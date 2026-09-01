@@ -1,0 +1,8 @@
+admin
+api
+backup
+config
+login
+robots.txt
+.sitemap.xml
+wp-admin

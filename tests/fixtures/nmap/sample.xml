@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<nmaprun scanner="nmap">
+  <host>
+    <address addr="192.0.2.1" addrtype="ipv4"/>
+    <ports>
+      <port protocol="tcp" portid="443">
+        <state state="open"/>
+        <service name="https" product="nginx" version="1.24.0">
+          <cpe>cpe:/a:nginx:nginx:1.24.0</cpe>
+        </service>
+      </port>
+    </ports>
+  </host>
+</nmaprun>

@@ -1,0 +1,11 @@
+[Unit]
+Description=Kitelon worker cron tick (recover + one job)
+Requires=kitelon-worker.service
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

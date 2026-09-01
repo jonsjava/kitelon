@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kitelon: Jobs</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1>Job queue</h1>
+    <nav>
+      <a href="/">Workspaces</a>
+      <a href="/jobs.html" class="active">Jobs</a>
+      <a href="/schedules.html">Schedules</a>
+    </nav>
+  </header>
+  <main>
+    <form id="enqueue" class="scan-form">
+      <h2 style="margin:0;color:#fff;font-size:1rem">Enqueue scan</h2>
+      <label>Workspace
+        <input name="workspace" data-workspace-input required placeholder="myscope">
+        <span class="field-hint">Letters, digits, . _ - only</span>
+      </label>
+      <label>Target<input name="target" required placeholder="example.com"></label>
+      <label>Mode
+        <select name="mode" id="scan-mode"></select>
+      </label>
+      <label>Priority
+        <input name="priority" type="number" value="100" min="1" max="9999">
+        <span class="field-hint">Lower runs sooner</span>
+      </label>
+      <fieldset class="scan-options-fieldset">
+        <legend>Scan options</legend>
+        <div id="scan-options"></div>
+      </fieldset>
+      <button type="submit">Enqueue</button>
+    </form>
+
+    <form id="reimport">
+      <h2 style="margin:0;color:#fff;font-size:1rem">Import workspace loot</h2>
+      <label>Workspace
+        <input name="workspace" data-workspace-input required placeholder="phase1-test">
+      </label>
+      <button type="submit">Queue import + report</button>
+    </form>
+
+    <table>
+      <thead>
+        <tr><th>ID</th><th>Status</th><th>Type</th><th>Workspace</th><th>Target</th><th>Mode</th><th>Priority</th><th>Error</th><th></th></tr>
+      </thead>
+      <tbody id="jobs"></tbody>
+    </table>
+    <p id="error" class="error"></p>
+  </main>
+  <script src="/static/app.js"></script>
+  <script>
+    const {
+      api, validateWorkspaceAlias, sanitizeWorkspaceAlias,
+      scanOptionsFromForm, renderScanOptions, fillModeSelect,
+    } = KitelonUI;
+
+    function workspaceFromForm(fd) {
+      const value = sanitizeWorkspaceAlias(fd.get("workspace"));
+      const err = validateWorkspaceAlias(value);
+      if (err) throw new Error(err);
+      return value;
+    }
+
+    function addCell(tr, text, cls) {
+      const td = document.createElement("td");
+      if (cls) td.className = cls;
+      td.textContent = text != null ? text : "";
+      tr.appendChild(td);
+    }
+
+    async function loadScanConfig() {
+      const cfg = await api("/api/v1/scan-config");
+      fillModeSelect(document.getElementById("scan-mode"), cfg.modes);
+      renderScanOptions(document.getElementById("scan-options"), cfg.options, "job");
+    }
+
+    async function loadJobs() {
+      const tbody = document.getElementById("jobs");
+      const err = document.getElementById("error");
+      tbody.innerHTML = "";
+      err.textContent = "";
+      try {
+        const jobs = await api("/api/v1/jobs?limit=50");
+        jobs.forEach((j) => {
+          const tr = document.createElement("tr");
+          if (j.status === "failed") tr.className = "job-failed";
+          addCell(tr, j.id);
+          addCell(tr, j.status, "status-" + j.status);
+          addCell(tr, j.job_type);
+          addCell(tr, j.workspace_alias || "");
+          addCell(tr, j.target || "");
+          addCell(tr, j.mode || "");
+          addCell(tr, j.priority != null ? j.priority : "");
+          const errTd = document.createElement("td");
+          errTd.className = "job-error";
+          if (j.error_message) {
+            errTd.textContent = j.error_message;
+            errTd.title = j.error_message;
+          } else if (j.status === "failed" && j.exit_code != null) {
+            errTd.textContent = "exit code " + j.exit_code;
+          }
+          tr.appendChild(errTd);
+          const actTd = document.createElement("td");
+          actTd.className = "job-actions";
+          if (j.status === "pending") {
+            const edit = document.createElement("button");
+            edit.type = "button";
+            edit.className = "secondary btn-sm";
+            edit.textContent = "Edit";
+            edit.addEventListener("click", async () => {
+              const p = prompt("Priority (lower runs sooner):", String(j.priority != null ? j.priority : 100));
+              if (p == null) return;
+              const t = prompt("Target:", j.target || "");
+              if (t == null) return;
+              try {
+                await api("/api/v1/jobs/" + j.id, {
+                  method: "PATCH",
+                  body: JSON.stringify({ priority: parseInt(p, 10), target: t }),
+                });
+                loadJobs();
+              } catch (e) {
+                document.getElementById("error").textContent = e.message;
+              }
+            });
+            actTd.appendChild(edit);
+          }
+          if (j.status === "failed" || j.status === "completed" || j.status === "cancelled") {
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "secondary btn-sm";
+            btn.textContent = "Re-queue";
+            btn.addEventListener("click", async () => {
+              btn.disabled = true;
+              try {
+                await api("/api/v1/jobs/" + j.id + "/retry", { method: "POST", body: "{}" });
+                loadJobs();
+              } catch (e) {
+                document.getElementById("error").textContent = e.message;
+                btn.disabled = false;
+              }
+            });
+            actTd.appendChild(btn);
+          }
+          const del = document.createElement("button");
+          del.type = "button";
+          del.className = "secondary btn-sm";
+          del.textContent = j.status === "running" ? "Cancel" : "Delete";
+          del.addEventListener("click", async () => {
+            const msg = j.status === "running"
+              ? "Cancel running job #" + j.id + "?"
+              : "Delete job #" + j.id + "?";
+            if (!confirm(msg)) return;
+            del.disabled = true;
+            try {
+              const q = j.status === "running" ? "?kill=true" : "";
+              await api("/api/v1/jobs/" + j.id + q, { method: "DELETE" });
+              loadJobs();
+            } catch (e) {
+              document.getElementById("error").textContent = e.message;
+              del.disabled = false;
+            }
+          });
+          actTd.appendChild(del);
+          tr.appendChild(actTd);
+          tbody.appendChild(tr);
+        });
+      } catch (e) {
+        err.textContent = e.message;
+      }
+    }
+
+    document.getElementById("enqueue").addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      const fd = new FormData(ev.target);
+      try {
+        const workspace = workspaceFromForm(fd);
+        const options = scanOptionsFromForm(ev.target);
+        await api("/api/v1/jobs", {
+          method: "POST",
+          body: JSON.stringify({
+            job_type: "scan",
+            workspace,
+            target: fd.get("target"),
+            mode: fd.get("mode"),
+            priority: parseInt(fd.get("priority"), 10) || 100,
+            options,
+            created_by: "web-ui",
+          }),
+        });
+        loadJobs();
+      } catch (e) {
+        document.getElementById("error").textContent = e.message;
+      }
+    });
+
+    document.getElementById("reimport").addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      const fd = new FormData(ev.target);
+      try {
+        const workspace = workspaceFromForm(fd);
+        await api("/api/v1/workspaces/" + encodeURIComponent(workspace) + "/import", {
+          method: "POST",
+          body: "{}",
+        });
+        loadJobs();
+      } catch (e) {
+        document.getElementById("error").textContent = e.message;
+      }
+    });
+
+    loadScanConfig().then(loadJobs);
+    setInterval(loadJobs, 15000);
+  </script>
+</body>
+</html>

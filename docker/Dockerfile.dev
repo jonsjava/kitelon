@@ -1,0 +1,55 @@
+# Slim Kitelon image for API/worker development (no offensive tool install).
+# Build:  docker build -f docker/Dockerfile.dev -t kitelon:dev .
+# Use with the same docker-compose.yml: set image: kitelon:dev on services.
+
+FROM python:3.12-slim-bookworm
+
+LABEL org.opencontainers.image.title="Kitelon (dev)" \
+      org.opencontainers.image.description="Kitelon API/worker without full tool chain"
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    KITELON_INSTALL_DIR=/usr/share/kitelon \
+    PYTHONPATH=/usr/share/kitelon/bin \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        bash curl dos2unix libpq5 libxml2 libxslt1.1 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir --break-system-packages \
+    'psycopg[binary]' \
+    fastapi \
+    python-multipart \
+    'uvicorn[standard]' \
+    croniter \
+    cmd2 \
+    dnspython \
+    colorama \
+    tldextract \
+    urllib3 \
+    requests \
+    webtech \
+    pdfkit
+
+COPY bin /usr/share/kitelon/bin
+COPY web /usr/share/kitelon/web
+COPY sql /usr/share/kitelon/sql
+COPY conf /usr/share/kitelon/conf
+COPY wordlists /usr/share/kitelon/wordlists
+COPY hooks /usr/share/kitelon/hooks
+COPY docker/kitelon.conf /usr/share/kitelon/kitelon.conf
+COPY kitelon /usr/share/kitelon/kitelon
+COPY docker/entrypoint.sh /usr/local/bin/kitelon-entrypoint.sh
+
+RUN mkdir -p /usr/share/kitelon/loot/workspace /usr/share/kitelon/plugins /var/log/kitelon \
+    && chmod 755 /usr/share/kitelon/kitelon /usr/local/bin/kitelon-entrypoint.sh \
+    && ln -sf /usr/share/kitelon/kitelon /usr/local/bin/kitelon \
+    && ln -sf /usr/share/kitelon/bin/kitelon_cli.py /usr/local/bin/kitelon-cli
+
+VOLUME ["/usr/share/kitelon/loot", "/var/log/kitelon"]
+EXPOSE 8080
+
+ENTRYPOINT ["/usr/local/bin/kitelon-entrypoint.sh"]
+CMD ["web"]

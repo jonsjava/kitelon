@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kitelon: Workspace</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1 id="title">Workspace</h1>
+    <nav>
+      <a href="/">Workspaces</a>
+      <a href="/jobs.html">Jobs</a>
+      <a href="/schedules.html">Schedules</a>
+    </nav>
+  </header>
+  <main>
+    <div class="toolbar">
+      <p id="meta" class="meta"></p>
+      <div class="toolbar-actions">
+        <button type="button" id="pentest-report-btn" class="secondary">Pentest Workbook ↗</button>
+        <button type="button" id="export-zip-btn" class="secondary">Export ZIP</button>
+        <button type="button" id="rename-btn" class="secondary">Rename</button>
+        <button type="button" id="pdf-btn" class="secondary">Download PDF (all)</button>
+        <button type="button" id="pdf-subset-btn" class="secondary">Report selected</button>
+        <button type="button" id="import-btn">Import loot</button>
+      </div>
+    </div>
+    <p id="import-msg" class="meta"></p>
+    <p id="pdf-msg" class="meta"></p>
+
+    <section class="import-panel">
+      <h2>External scanner imports</h2>
+      <p class="meta">Upload Nessus (.nessus) or Burp (XML/JSON) exports into this workspace.</p>
+      <div class="import-row">
+        <label class="file-label">Nessus export
+          <input type="file" id="nessus-file" accept=".nessus,.xml">
+        </label>
+        <button type="button" id="nessus-btn" class="secondary">Import Nessus</button>
+      </div>
+      <div class="import-row">
+        <label class="file-label">Burp export
+          <input type="file" id="burp-file" accept=".xml,.json">
+        </label>
+        <button type="button" id="burp-btn" class="secondary">Import Burp</button>
+      </div>
+      <p id="scanner-import-msg" class="meta"></p>
+    </section>
+
+    <section>
+      <div class="hosts-toolbar">
+        <h2>Hosts</h2>
+        <div class="hosts-toolbar-actions">
+          <button type="button" id="select-all-hosts" class="secondary btn-sm">Select all</button>
+          <button type="button" id="clear-hosts" class="secondary btn-sm">Clear</button>
+        </div>
+      </div>
+      <table>
+        <thead>
+          <tr><th></th><th>Host</th><th>IP</th><th>Ports</th><th>SSL</th><th>Risk</th><th></th></tr>
+        </thead>
+        <tbody id="hosts"></tbody>
+      </table>
+      <p id="hosts-empty" class="empty" hidden>No hosts imported yet.</p>
+    </section>
+
+    <section style="margin-top:1.5rem" id="summary-section" hidden>
+      <h2>Summary</h2>
+      <div id="summary-stats" class="stats"></div>
+    </section>
+
+    <section style="margin-top:1.5rem" class="enrichment-panel">
+      <div class="hosts-toolbar">
+        <h2>Enriched loot</h2>
+        <div class="findings-filters">
+          <input type="text" id="enrich-host" placeholder="Host filter (optional)" class="filter-input filter-host">
+          <button type="button" id="enrich-refresh" class="secondary btn-sm">Refresh</button>
+        </div>
+      </div>
+      <p class="meta">Structured data from import (nmap services, webtech, katana URLs, scan manifest).</p>
+
+      <h3 class="subsection-title">Services</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Host</th><th>Port</th><th>Proto</th><th>Product</th><th>Version</th></tr>
+          </thead>
+          <tbody id="enrich-services"></tbody>
+        </table>
+      </div>
+      <p id="enrich-services-empty" class="empty" hidden>No services imported.</p>
+
+      <h3 class="subsection-title">Technologies</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Host</th><th>Port</th><th>Name</th><th>Version</th></tr>
+          </thead>
+          <tbody id="enrich-tech"></tbody>
+        </table>
+      </div>
+      <p id="enrich-tech-empty" class="empty" hidden>No technologies imported.</p>
+
+      <h3 class="subsection-title">Discovered URLs</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Host</th><th>Source</th><th>URL</th></tr>
+          </thead>
+          <tbody id="enrich-urls"></tbody>
+        </table>
+      </div>
+      <p id="enrich-urls-empty" class="empty" hidden>No URLs imported.</p>
+
+      <h3 class="subsection-title">Scan runs</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>ID</th><th>Mode</th><th>Target</th><th>Started</th><th>Finished</th></tr>
+          </thead>
+          <tbody id="enrich-runs"></tbody>
+        </table>
+      </div>
+      <p id="enrich-runs-empty" class="empty" hidden>No scan runs recorded.</p>
+    </section>
+
+    <section style="margin-top:1.5rem">
+      <div class="hosts-toolbar">
+        <h2>Findings</h2>
+        <div class="findings-filters">
+          <input type="search" id="vuln-q" placeholder="Search findings…" class="filter-input">
+          <select id="vuln-severity" class="filter-select">
+            <option value="">All severities</option>
+            <option value="CRITICAL">Critical</option>
+            <option value="HIGH">High</option>
+            <option value="MEDIUM">Medium</option>
+            <option value="LOW">Low</option>
+            <option value="INFO">Info</option>
+          </select>
+          <input type="text" id="vuln-host" placeholder="Host filter" class="filter-input filter-host">
+          <button type="button" id="vuln-filter-btn" class="secondary btn-sm">Filter</button>
+          <button type="button" id="vuln-clear-btn" class="secondary btn-sm">Clear</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+      <table class="findings-table">
+        <thead>
+          <tr><th>Severity</th><th>Host</th><th>Finding</th><th>URL</th></tr>
+        </thead>
+        <tbody id="vulns"></tbody>
+      </table>
+      </div>
+      <p id="vulns-empty" class="empty" hidden>No findings imported yet.</p>
+    </section>
+    <section style="margin-top:1.5rem">
+      <div class="hosts-toolbar">
+        <h2>Stored artifacts</h2>
+        <button type="button" id="artifacts-refresh" class="secondary btn-sm">Refresh</button>
+      </div>
+      <table>
+        <thead>
+          <tr><th>Path</th><th>Type</th><th>Size</th><th></th></tr>
+        </thead>
+        <tbody id="artifacts"></tbody>
+      </table>
+      <p id="artifacts-empty" class="empty" hidden>No artifacts archived yet. Run Import loot after a scan.</p>
+    </section>
+    <p id="error" class="error"></p>
+  </main>
+  <script src="/static/app.js"></script>
+  <script>
+    const { api, download, upload, reportPdfUrl, artifactUrl, formatBytes, stat, fillRow } = KitelonUI;
+    const params = new URLSearchParams(location.search);
+    const alias = params.get("alias");
+    document.getElementById("title").textContent = alias || "Workspace";
+
+    let lastImportedAt = null;
+
+    function selectedHostnames() {
+      return Array.from(document.querySelectorAll(".host-select:checked")).map((el) => el.value);
+    }
+
+    async function downloadReport(hosts, filename) {
+      await download(reportPdfUrl(alias, hosts, true), filename);
+    }
+
+    async function loadEnrichment() {
+      if (!alias) return;
+      const host = document.getElementById("enrich-host").value.trim();
+      const hostParam = host ? "?hostname=" + encodeURIComponent(host) + "&limit=200" : "?limit=200";
+
+      const base = "/api/v1/workspaces/" + encodeURIComponent(alias);
+      const [services, tech, urls, runs] = await Promise.all([
+        api(base + "/services" + hostParam),
+        api(base + "/technologies" + hostParam),
+        api(base + "/urls" + hostParam),
+        api(base + "/scan-runs?limit=50"),
+      ]);
+
+      function fillTable(tbodyId, emptyId, rows, renderRow) {
+        const tbody = document.getElementById(tbodyId);
+        tbody.innerHTML = "";
+        document.getElementById(emptyId).hidden = rows.length > 0;
+        rows.forEach((row) => tbody.appendChild(renderRow(row)));
+      }
+
+      fillTable("enrich-services", "enrich-services-empty", services, (r) => {
+        const tr = document.createElement("tr");
+        return fillRow(tr, [r.hostname, r.port, r.protocol || "", r.product || "", r.version || ""]);
+      });
+
+      fillTable("enrich-tech", "enrich-tech-empty", tech, (r) => {
+        const tr = document.createElement("tr");
+        return fillRow(tr, [r.hostname, r.port ?? "", r.name, r.version || ""]);
+      });
+
+      fillTable("enrich-urls", "enrich-urls-empty", urls, (r) => {
+        const tr = document.createElement("tr");
+        fillRow(tr, [r.hostname, r.source || ""]);
+        const td = document.createElement("td");
+        const a = document.createElement("a");
+        a.href = r.url || "";
+        a.target = "_blank";
+        a.rel = "noopener";
+        a.textContent = r.url || "";
+        td.appendChild(a);
+        tr.appendChild(td);
+        return tr;
+      });
+
+      fillTable("enrich-runs", "enrich-runs-empty", runs, (r) => {
+        const tr = document.createElement("tr");
+        return fillRow(tr, [r.id, r.mode || "", r.target || "", r.started_at || "", r.finished_at || ""]);
+      });
+    }
+
+    function renderSummaryStats(stats) {
+      const section = document.getElementById("summary-section");
+      const container = document.getElementById("summary-stats");
+      container.innerHTML = "";
+      if (!stats || !Object.keys(stats).length) {
+        section.hidden = true;
+        return;
+      }
+      section.hidden = false;
+      const order = [
+        "workspace_risk_score",
+        "hosts_total",
+        "vulnerabilities_total",
+        "vuln_critical_total",
+        "vuln_high_total",
+        "tasks_total",
+      ];
+      const seen = new Set();
+      order.forEach((key) => {
+        if (stats[key] != null) {
+          container.appendChild(stat(key.replace(/_/g, " "), stats[key]));
+          seen.add(key);
+        }
+      });
+      Object.keys(stats).sort().forEach((key) => {
+        if (!seen.has(key)) {
+          container.appendChild(stat(key.replace(/_/g, " "), stats[key]));
+        }
+      });
+    }
+
+    async function loadVulns() {
+      if (!alias) return;
+      const params = new URLSearchParams({ limit: "200" });
+      const q = document.getElementById("vuln-q").value.trim();
+      const sev = document.getElementById("vuln-severity").value;
+      const host = document.getElementById("vuln-host").value.trim();
+      if (q) params.set("q", q);
+      if (sev) params.set("severity", sev);
+      if (host) params.set("hostname", host);
+      const vulns = await api(
+        "/api/v1/workspaces/" + encodeURIComponent(alias) + "/vulns?" + params
+      );
+      const vt = document.getElementById("vulns");
+      vt.innerHTML = "";
+      document.getElementById("vulns-empty").hidden = vulns.length > 0;
+      vulns.forEach((v) => {
+        const tr = document.createElement("tr");
+        fillRow(tr, [v.severity, v.hostname, v.name, v.url || ""]);
+        vt.appendChild(tr);
+      });
+    }
+
+    async function loadArtifacts() {
+      if (!alias) return;
+      const rows = await api(
+        "/api/v1/workspaces/" + encodeURIComponent(alias) + "/artifacts?limit=500"
+      );
+      const tbody = document.getElementById("artifacts");
+      tbody.innerHTML = "";
+      document.getElementById("artifacts-empty").hidden = rows.length > 0;
+      rows.forEach((a) => {
+        const tr = document.createElement("tr");
+        const pathTd = document.createElement("td");
+        const code = document.createElement("code");
+        code.textContent = a.rel_path;
+        pathTd.appendChild(code);
+        tr.appendChild(pathTd);
+        tr.appendChild(document.createElement("td")).textContent = a.content_type || "";
+        tr.appendChild(document.createElement("td")).textContent = formatBytes(a.size_bytes);
+        const act = document.createElement("td");
+        const link = document.createElement("a");
+        link.href = "#";
+        link.textContent = "Download";
+        link.className = "artifact-link";
+        link.addEventListener("click", (e) => {
+          e.preventDefault();
+          const name = (a.rel_path || "artifact").split("/").pop();
+          download(artifactUrl(alias, a.rel_path), name);
+        });
+        act.appendChild(link);
+        tr.appendChild(act);
+        tbody.appendChild(tr);
+      });
+    }
+
+    async function load() {
+      if (!alias) return;
+      const err = document.getElementById("error");
+      err.textContent = "";
+      try {
+        const ws = await api("/api/v1/workspaces/" + encodeURIComponent(alias));
+        lastImportedAt = ws.last_imported_at || null;
+        document.getElementById("meta").textContent =
+          "Imported: " + (lastImportedAt || "never") +
+          (ws.stats && ws.stats.ssl_scans_total
+            ? " · SSL scans: " + ws.stats.ssl_scans_total
+            : "");
+        renderSummaryStats(ws.stats || {});
+        const hosts = await api("/api/v1/workspaces/" + encodeURIComponent(alias) + "/hosts?limit=200");
+        let sslByHost = {};
+        try {
+          const sslScans = await api("/api/v1/workspaces/" + encodeURIComponent(alias) + "/ssl-scans");
+          sslScans.forEach((s) => {
+            sslByHost[s.hostname] = s;
+          });
+        } catch (_) {
+          /* no ssl scans yet */
+        }
+        const tbody = document.getElementById("hosts");
+        tbody.innerHTML = "";
+        document.getElementById("hosts-empty").hidden = hosts.length > 0;
+        hosts.forEach((h) => {
+          const tr = document.createElement("tr");
+          tr.dataset.hostname = h.hostname;
+          const checkTd = document.createElement("td");
+          const cb = document.createElement("input");
+          cb.type = "checkbox";
+          cb.className = "host-select";
+          cb.value = h.hostname;
+          checkTd.appendChild(cb);
+          tr.appendChild(checkTd);
+          const nameTd = document.createElement("td");
+          nameTd.textContent = h.hostname;
+          tr.appendChild(nameTd);
+          tr.appendChild(document.createElement("td")).textContent = h.ip || "";
+          const portsTd = document.createElement("td");
+          const code = document.createElement("code");
+          code.textContent = h.open_ports || "";
+          portsTd.appendChild(code);
+          tr.appendChild(portsTd);
+          const sslTd = document.createElement("td");
+          const ssl = sslByHost[h.hostname];
+          if (ssl) {
+            const sslBtn = document.createElement("button");
+            sslBtn.type = "button";
+            sslBtn.className = "secondary btn-sm ssl-grade-btn";
+            sslBtn.textContent = ssl.grade ? "Grade " + ssl.grade : "SSL ↗";
+            sslBtn.title = "Open SSL/TLS report for " + h.hostname + ":" + ssl.port;
+            sslBtn.addEventListener("click", () => openHostSslReport(h.hostname, ssl.port));
+            sslTd.appendChild(sslBtn);
+          } else {
+            sslTd.innerHTML = "<span class='muted'>-</span>";
+          }
+          tr.appendChild(sslTd);
+          tr.appendChild(document.createElement("td")).textContent = h.risk_score;
+          const actTd = document.createElement("td");
+          actTd.className = "job-actions";
+          const ren = document.createElement("button");
+          ren.type = "button";
+          ren.className = "secondary btn-sm";
+          ren.textContent = "Rename";
+          ren.addEventListener("click", async () => {
+            const newName = prompt("Rename host:", h.hostname);
+            if (!newName || newName === h.hostname) return;
+            try {
+              await api(
+                "/api/v1/workspaces/" + encodeURIComponent(alias) +
+                "/hosts/" + encodeURIComponent(h.hostname),
+                { method: "PATCH", body: JSON.stringify({ hostname: newName }) }
+              );
+              await load();
+            } catch (e) {
+              document.getElementById("error").textContent = e.message;
+            }
+          });
+          actTd.appendChild(ren);
+          tr.appendChild(actTd);
+          tbody.appendChild(tr);
+        });
+        await loadVulns();
+        await loadEnrichment();
+        await loadArtifacts();
+      } catch (e) {
+        err.textContent = e.message;
+      }
+    }
+
+    async function pollUntilImported(since) {
+      const msg = document.getElementById("import-msg");
+      const btn = document.getElementById("import-btn");
+      const deadline = Date.now() + 300000;
+      while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 3000));
+        const ws = await api("/api/v1/workspaces/" + encodeURIComponent(alias));
+        if (ws.last_imported_at && ws.last_imported_at !== since) {
+          msg.textContent = "Import complete.";
+          btn.disabled = false;
+          await load();
+          return;
+        }
+      }
+      msg.textContent = "Import still running: see Jobs page for status.";
+      btn.disabled = false;
+    }
+
+    document.getElementById("rename-btn").addEventListener("click", async () => {
+      if (!alias) return;
+      const newAlias = prompt("New workspace alias:", alias);
+      if (!newAlias || newAlias === alias) return;
+      try {
+        await api("/api/v1/workspaces/" + encodeURIComponent(alias), {
+          method: "PATCH",
+          body: JSON.stringify({ alias: newAlias }),
+        });
+        location.href = "/workspace.html?alias=" + encodeURIComponent(newAlias);
+      } catch (e) {
+        document.getElementById("error").textContent = e.message;
+      }
+    });
+
+    async function importScanner(kind, inputId, btnId) {
+      if (!alias) return;
+      const input = document.getElementById(inputId);
+      const btn = document.getElementById(btnId);
+      const msg = document.getElementById("scanner-import-msg");
+      if (!input.files || !input.files[0]) {
+        msg.textContent = "Choose a file first.";
+        return;
+      }
+      btn.disabled = true;
+      msg.textContent = "Importing…";
+      try {
+        const result = await upload(
+          "/api/v1/workspaces/" + encodeURIComponent(alias) + "/import/" + kind,
+          input.files[0]
+        );
+        msg.textContent = "Imported " + result.imported + " finding(s). Report job #" + result.report_job_id;
+        input.value = "";
+        await load();
+      } catch (e) {
+        msg.textContent = e.message;
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    document.getElementById("nessus-btn").addEventListener("click", () => importScanner("nessus", "nessus-file", "nessus-btn"));
+    document.getElementById("burp-btn").addEventListener("click", () => importScanner("burp", "burp-file", "burp-btn"));
+
+    document.getElementById("import-btn").addEventListener("click", async () => {
+      if (!alias) return;
+      const btn = document.getElementById("import-btn");
+      const msg = document.getElementById("import-msg");
+      btn.disabled = true;
+      msg.textContent = "";
+      try {
+        const job = await api("/api/v1/workspaces/" + encodeURIComponent(alias) + "/import", {
+          method: "POST",
+          body: "{}",
+        });
+        msg.textContent = "Import queued (job #" + job.id + "). ";
+        const link = document.createElement("a");
+        link.href = "/jobs.html";
+        link.textContent = "View jobs";
+        msg.appendChild(link);
+        pollUntilImported(lastImportedAt);
+      } catch (e) {
+        msg.textContent = e.message;
+        btn.disabled = false;
+      }
+    });
+
+    document.getElementById("vuln-filter-btn").addEventListener("click", () => loadVulns().catch((e) => {
+      document.getElementById("error").textContent = e.message;
+    }));
+    document.getElementById("vuln-clear-btn").addEventListener("click", () => {
+      document.getElementById("vuln-q").value = "";
+      document.getElementById("vuln-severity").value = "";
+      document.getElementById("vuln-host").value = "";
+      loadVulns().catch((e) => { document.getElementById("error").textContent = e.message; });
+    });
+    document.getElementById("vuln-q").addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") document.getElementById("vuln-filter-btn").click();
+    });
+    document.getElementById("artifacts-refresh").addEventListener("click", () => loadArtifacts().catch((e) => {
+      document.getElementById("error").textContent = e.message;
+    }));
+    document.getElementById("enrich-refresh").addEventListener("click", () => loadEnrichment().catch((e) => {
+      document.getElementById("error").textContent = e.message;
+    }));
+    document.getElementById("enrich-host").addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") document.getElementById("enrich-refresh").click();
+    });
+
+    async function openPentestReport() {
+      if (!alias) return;
+      const btn = document.getElementById("pentest-report-btn");
+      btn.disabled = true;
+      try {
+        const headers = {};
+        const key = sessionStorage.getItem(KitelonUI.apiKeyStorage);
+        if (key) headers["X-API-Key"] = key;
+        const res = await fetch(
+          "/api/v1/workspaces/" + encodeURIComponent(alias) + "/pentest-report.html",
+          { headers }
+        );
+        if (res.status === 401) {
+          const k = prompt("Kitelon API key required by server:") || "";
+          if (k) {
+            sessionStorage.setItem(KitelonUI.apiKeyStorage, k);
+            return openPentestReport();
+          }
+          throw new Error("401 unauthorized");
+        }
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(res.status + " " + text);
+        }
+        const html = await res.text();
+        const popup = window.open(
+          "",
+          "kitelon-pentest-" + alias,
+          "width=1280,height=920,scrollbars=yes,resizable=yes"
+        );
+        if (!popup) {
+          throw new Error("Pop-up blocked: allow pop-ups for this site.");
+        }
+        popup.document.open();
+        popup.document.write(html);
+        popup.document.close();
+        popup.document.title = "Pentest Workbook: " + alias;
+      } catch (e) {
+        document.getElementById("error").textContent = e.message;
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    async function openHostSslReport(hostname, port) {
+      if (!alias || !hostname) return;
+      try {
+        const headers = {};
+        const key = sessionStorage.getItem(KitelonUI.apiKeyStorage);
+        if (key) headers["X-API-Key"] = key;
+        const url =
+          "/api/v1/workspaces/" + encodeURIComponent(alias) +
+          "/hosts/" + encodeURIComponent(hostname) +
+          "/ssl-report.html?port=" + encodeURIComponent(port || 443);
+        const res = await fetch(url, { headers });
+        if (res.status === 401) {
+          const k = prompt("Kitelon API key required by server:") || "";
+          if (k) {
+            sessionStorage.setItem(KitelonUI.apiKeyStorage, k);
+            return openHostSslReport(hostname, port);
+          }
+          throw new Error("401 unauthorized");
+        }
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(res.status + " " + text);
+        }
+        const html = await res.text();
+        const popup = window.open(
+          "",
+          "kitelon-ssl-" + alias + "-" + hostname,
+          "width=1150,height=900,scrollbars=yes,resizable=yes"
+        );
+        if (!popup) {
+          throw new Error("Pop-up blocked: allow pop-ups for this site.");
+        }
+        popup.document.open();
+        popup.document.write(html);
+        popup.document.close();
+        popup.document.title = "SSL/TLS: " + hostname;
+      } catch (e) {
+        document.getElementById("error").textContent = e.message;
+      }
+    }
+
+    document.getElementById("pentest-report-btn").addEventListener("click", openPentestReport);
+
+    document.getElementById("export-zip-btn").addEventListener("click", async () => {
+      if (!alias) return;
+      const btn = document.getElementById("export-zip-btn");
+      btn.disabled = true;
+      try {
+        await download(
+          "/api/v1/workspaces/" + encodeURIComponent(alias) + "/export.zip",
+          "kitelon-" + alias + ".zip"
+        );
+      } catch (e) {
+        document.getElementById("error").textContent = e.message;
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    document.getElementById("select-all-hosts").addEventListener("click", () => {
+      document.querySelectorAll(".host-select").forEach((el) => { el.checked = true; });
+    });
+    document.getElementById("clear-hosts").addEventListener("click", () => {
+      document.querySelectorAll(".host-select").forEach((el) => { el.checked = false; });
+    });
+
+    document.getElementById("pdf-subset-btn").addEventListener("click", async () => {
+      if (!alias) return;
+      const hosts = selectedHostnames();
+      if (!hosts.length) {
+        document.getElementById("pdf-msg").textContent = "Select one or more hosts first.";
+        return;
+      }
+      const btn = document.getElementById("pdf-subset-btn");
+      const msg = document.getElementById("pdf-msg");
+      btn.disabled = true;
+      msg.textContent = "Generating subset PDF for " + hosts.length + " host(s)…";
+      try {
+        await downloadReport(hosts, "kitelon-" + alias + "-subset.pdf");
+        msg.textContent = "Subset PDF downloaded (" + hosts.length + " hosts).";
+      } catch (e) {
+        msg.textContent = e.message;
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    document.getElementById("pdf-btn").addEventListener("click", async () => {
+      if (!alias) return;
+      const btn = document.getElementById("pdf-btn");
+      const msg = document.getElementById("pdf-msg");
+      btn.disabled = true;
+      msg.textContent = "Generating PDF…";
+      try {
+        let lastErr = null;
+        for (let attempt = 0; attempt < 12; attempt++) {
+          try {
+            await downloadReport([], "kitelon-" + alias + "-report.pdf");
+            msg.textContent = "PDF downloaded.";
+            lastErr = null;
+            break;
+          } catch (e) {
+            lastErr = e;
+            if (String(e.message).startsWith("409") && attempt < 11) {
+              msg.textContent = "Report queued: waiting for worker…";
+              await new Promise((r) => setTimeout(r, 5000));
+              continue;
+            }
+            throw e;
+          }
+        }
+        if (lastErr) throw lastErr;
+      } catch (e) {
+        msg.textContent = e.message;
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    load();
+  </script>
+</body>
+</html>

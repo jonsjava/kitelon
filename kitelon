@@ -1,0 +1,868 @@
+#!/bin/bash
+# Copyright (c) 2026 Kitelon contributors: MIT License (see LICENSE.md)
+# Kitelon CLI: workspace scans, loot, database, and web UI launcher.
+# Authorized security testing and educational use only: see docs/LEGAL.md
+
+if [[ $EUID -ne 0 ]]; then
+   echo "This script must be run as root"
+   exit 1
+fi
+
+_KITELON_BIN="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
+_KL_SCRIPT_DIR="$(cd "$(dirname "$_KITELON_BIN")" && pwd)"
+INSTALL_DIR="$_KL_SCRIPT_DIR"
+VER="$(tr -d '[:space:]' < "$_KL_SCRIPT_DIR/VERSION" 2>/dev/null || echo "0.0.0")"
+LOOT_DIR="$INSTALL_DIR/loot/$TARGET"
+POST_LOOT_HOOK="$INSTALL_DIR/hooks/post-loot.sh"
+
+# shellcheck source=/dev/null
+source "$_KL_SCRIPT_DIR/bin/kitelon_ui.sh"
+# shellcheck source=/dev/null
+source "$_KL_SCRIPT_DIR/bin/kitelon_authorization.sh"
+
+KITELON_QUIET=0
+for _kl_arg in "$@"; do
+  case "$_kl_arg" in
+    --is-running|--stop) KITELON_QUIET=1 ;;
+  esac
+done
+
+if [[ -f "$_KL_SCRIPT_DIR/bin/permissions.sh" ]]; then
+  # shellcheck source=/dev/null
+  source "$_KL_SCRIPT_DIR/bin/permissions.sh"
+fi
+
+# INIT POSTGRESQL
+service postgresql start 2> /dev/null
+
+# LOAD DEFAULT KITELON CONFIGURATION FILE (may override INSTALL_DIR for deployed layouts)
+dos2unix "$_KL_SCRIPT_DIR/kitelon.conf" 2> /dev/null > /dev/null
+# shellcheck source=/dev/null
+source "$_KL_SCRIPT_DIR/kitelon.conf"
+if [[ "$KITELON_QUIET" != "1" ]]; then
+  kl_msg_status "Loaded configuration file from $_KL_SCRIPT_DIR/kitelon.conf"
+fi
+
+if [[ -f /root/.kitelon.conf ]]; then
+  dos2unix /root/.kitelon.conf 2> /dev/null > /dev/null
+  source /root/.kitelon.conf
+  if [[ "$KITELON_QUIET" != "1" ]]; then
+    kl_msg_status "Loaded configuration file from /root/.kitelon.conf"
+  fi
+
+  if [[ -f /root/.kitelon_api_keys.conf ]]; then
+    dos2unix /root/.kitelon_api_keys.conf 2> /dev/null > /dev/null
+    source /root/.kitelon_api_keys.conf
+    if [[ "$KITELON_QUIET" != "1" ]]; then
+      kl_msg_status "Loaded API keys from /root/.kitelon_api_keys.conf"
+    fi
+  fi
+else
+  cp "$_KL_SCRIPT_DIR/kitelon.conf" /root/.kitelon.conf 2> /dev/null
+  dos2unix /root/.kitelon.conf 2> /dev/null > /dev/null
+  source /root/.kitelon.conf
+  if [[ "$KITELON_QUIET" != "1" ]]; then
+    kl_msg_status "Loaded configuration file from /root/.kitelon.conf"
+  fi
+fi
+
+unset KL_UI_LOADED
+# shellcheck source=/dev/null
+source "$_KL_SCRIPT_DIR/bin/kitelon_ui.sh"
+
+if [[ -f "$INSTALL_DIR/bin/banner.sh" ]]; then
+  source "$INSTALL_DIR/bin/banner.sh"
+elif [[ -f "$_KL_SCRIPT_DIR/bin/banner.sh" ]]; then
+  source "$_KL_SCRIPT_DIR/bin/banner.sh"
+fi
+
+DISTRO=$(cat /etc/*-release | grep DISTRIB_ID= | cut -d'=' -f2)
+
+kitelon_normalize_workspace_name() {
+  local n
+  n=$(printf '%s' "$1" | tr '/ ' '-' | sed -E 's/-+/-/g; s/^-+|-+$//g')
+  if [[ -z "$n" || "$n" == *..* || "$n" == .* ]]; then
+    echo "invalid workspace alias: $1" >&2
+    return 1
+  fi
+  if [[ ! "$n" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$ ]]; then
+    echo "invalid workspace alias: $1" >&2
+    return 1
+  fi
+  printf '%s\n' "$n"
+}
+
+kitelon_apply_workspace() {
+  [[ -n "$WORKSPACE" ]] || return 0
+  WORKSPACE="$(kitelon_normalize_workspace_name "$WORKSPACE")" || exit 1
+  WORKSPACE_DIR="$INSTALL_DIR/loot/workspace/$WORKSPACE"
+}
+
+kitelon_init_workspace_dirs() {
+  local dir="$1"
+  [[ -n "$dir" ]] || return 1
+  kitelon_secure_loot_dir "$dir"
+  mkdir -p "$dir"/{artifacts/nmap,artifacts/web,artifacts/ssl,artifacts/recon,artifacts/ports,artifacts/tools,artifacts/screenshots,reports}
+  touch "$dir/findings.jsonl" "$dir/manifest.json" "$dir/scan.log" 2>/dev/null
+  kitelon_secure_loot "$dir"
+}
+
+function kl_help {
+  kl_print_header
+  kl_print_legal_notice
+  echo ""
+  local star
+  printf -v star "${KL_C_INFO}[*]${KL_RESET}"
+  cat <<EOHELP
+
+$star QUICK START (authorized targets only)
+ kitelon -w <WORKSPACE> -t <TARGET>
+ kitelon -w <WORKSPACE> -t <TARGET> -m stealth -o -re
+ kitelon -w <WORKSPACE> -t <TARGET> -m normal
+
+$star INTERACTIVE CONSOLE (recommended)
+ kitelon-cli
+ kitelon-cli -c 'workspace list'
+
+$star WEB UI + JSON API
+ kitelon --web
+
+$star WORKSPACES
+ kitelon workspaces list
+ kitelon workspaces show <ALIAS>
+ kitelon --list
+
+$star JOB QUEUE
+ kitelon jobs list
+ kitelon jobs enqueue -t <TARGET> -w <WORKSPACE> -m <MODE>
+
+$star DATABASE
+ kitelon db migrate
+ kitelon db test
+ kitelon db import <WORKSPACE_ALIAS>
+
+$star SCAN CONTROL
+ kitelon --is-running
+ kitelon --stop
+ kitelon -t <TARGET> -w <WORKSPACE> -rr
+
+$star ADMIN
+ kitelon -w <WORKSPACE> --export
+ kitelon --import-zip /path/to/workspace.zip
+ kitelon -u|--update
+
+Full mode and flag reference: kitelon-cli help scan
+Legal use policy: docs/LEGAL.md
+
+EOHELP
+  exit
+}
+
+function kl_print_header {
+  kitelon_banner
+  echo ""
+  kl_section "Kitelon v${VER}"
+  echo ""
+}
+
+function kitelon_status {
+  watch -n 1 -c 'ps -ef | egrep "kitelon|python|dirsearch|nmap|curl|wget|nikto" && echo "NETWORK CONNECTIONS..." && netstat -an | egrep "TIME_WAIT|EST"'
+}
+
+# Match only the kitelon CLI binary (not Cursor, plugins paths, or generic greps).
+kitelon_cmd_is_binary() {
+  local args="$1"
+  [[ "$args" == *"${INSTALL_DIR}/kitelon "* ]] && return 0
+  [[ "$args" == *" ${INSTALL_DIR}/kitelon "* ]] && return 0
+  [[ "$args" == *"bash ${INSTALL_DIR}/kitelon"* ]] && return 0
+  [[ "$args" == "/usr/local/bin/kitelon "* ]] && return 0
+  [[ "$args" == *" /usr/local/bin/kitelon "* ]] && return 0
+  [[ "$args" == *"bash /usr/local/bin/kitelon"* ]] && return 0
+  [[ "$args" == "/usr/bin/kitelon "* ]] && return 0
+  [[ "$args" == *" /usr/bin/kitelon "* ]] && return 0
+  [[ "$args" == *"bash /usr/bin/kitelon"* ]] && return 0
+  return 1
+}
+
+# Meta/admin invocations: not an active scan workload.
+kitelon_cmd_is_meta() {
+  local args="$1"
+  case "$args" in
+    *"--is-running"*|*"--stop"*|*"--help"*|*" --help"*|*"--list"*|*"--status"*)
+      return 0
+      ;;
+    *"--reload"*|*"--export"*|*"--update"*|*" --update"*)
+      return 0
+      ;;
+    *" -h"|*" -u"|*" -d"|*" --delete"*|*" -dh"*|*" -dt"*)
+      return 0
+      ;;
+    *"-c "*|*" --config "*)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+# Active scan or loot job (reimport counts: it processes workspace data).
+kitelon_cmd_is_workload() {
+  local args="$1"
+  kitelon_cmd_is_meta "$args" && return 1
+  case "$args" in
+    *"--reimport"*)
+      return 0
+      ;;
+    *" -t "*|*" -t"*|*" -f "*|*" -f"*|*" -m "*|*" -m"*|*" -fp"*|*" -b"*|*" -o"*|*" -re"*)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+kitelon_collect_scan_roots() {
+  local self=$$ pid args
+  while read -r pid args; do
+    [[ -z "$pid" || "$pid" -eq "$self" ]] && continue
+    kitelon_cmd_is_binary "$args" || continue
+    kitelon_cmd_is_workload "$args" || continue
+    if [[ -n "$WORKSPACE" ]] && [[ "$args" != *" -w ${WORKSPACE}"* ]] && [[ "$args" != *" -w ${WORKSPACE} "* ]]; then
+      continue
+    fi
+    if [[ -n "$TARGET" ]] && [[ "$args" != *" -t ${TARGET}"* ]] && [[ "$args" != *" -t ${TARGET} "* ]]; then
+      continue
+    fi
+    echo "$pid"
+  done < <(ps -eo pid=,args= 2>/dev/null)
+}
+
+kitelon_descendant_pids() {
+  local root="$1" child
+  for child in $(pgrep -P "$root" 2>/dev/null); do
+    echo "$child"
+    kitelon_descendant_pids "$child"
+  done
+}
+
+kitelon_all_scan_pids() {
+  local pid
+  for pid in $(kitelon_collect_scan_roots); do
+    echo "$pid"
+    kitelon_descendant_pids "$pid"
+  done | sort -nu
+}
+
+kitelon_clear_running_markers() {
+  local scans_dir marker
+  find "$INSTALL_DIR/loot" -path '*/scans/running_*.txt' -type f -delete 2>/dev/null
+  while IFS= read -r scans_dir; do
+    echo 0 > "$scans_dir/tasks-running.txt" 2>/dev/null
+  done < <(find "$INSTALL_DIR/loot" -path '*/scans' -type d 2>/dev/null)
+}
+
+kitelon_is_running_cmd() {
+  local pids
+  pids=$(kitelon_all_scan_pids)
+  if [[ -n "$pids" ]]; then
+    echo "true"
+    return 0
+  fi
+  echo "false"
+  return 1
+}
+
+kitelon_stop_cmd() {
+  local pid pids stopped=0
+  pids=$(kitelon_all_scan_pids)
+  if [[ -z "$pids" ]]; then
+    kitelon_clear_running_markers
+    echo "false"
+    return 1
+  fi
+  for pid in $pids; do
+    kill -TERM "$pid" 2>/dev/null && stopped=1
+  done
+  sleep 2
+  for pid in $pids; do
+    if kill -0 "$pid" 2>/dev/null; then
+      kill -KILL "$pid" 2>/dev/null && stopped=1
+    fi
+  done
+  kitelon_clear_running_markers
+  if [[ "$stopped" -eq 1 ]]; then
+    echo "true"
+    return 0
+  fi
+  echo "false"
+  return 1
+}
+
+function check_update {
+  if [[ "$ENABLE_AUTO_UPDATES" == "1" ]] && [[ "$ONLINE" == "1" ]]; then
+    echo -e "$KL_C_INFO[$KL_RESET${KL_C_ERR}i${KL_RESET}$KL_C_INFO] Updates are available via$KL_C_ERR \"kitelon -u\"$KL_RESET when a git remote is configured."
+  fi
+  touch /tmp/kitelon-update-check.txt 2> /dev/null
+}
+
+function update {
+  kl_print_header
+  echo -e "$KL_C_INFO[*]$KL_RESET Checking for updates...$KL_C_INFO[$KL_RESET${KL_C_OK}OK${KL_RESET}$KL_C_INFO]$KL_RESET"
+
+  if [[ "$ONLINE" == "0" ]]; then
+    echo "No internet connection. Cannot check for updates."
+    exit 1
+  fi
+
+  if ! command -v git &>/dev/null; then
+    echo "git is not installed. Cannot update from source."
+    exit 1
+  fi
+
+  REPO_ROOT=$(cd "$INSTALL_DIR" && git rev-parse --show-toplevel 2>/dev/null)
+  if [[ -z "$REPO_ROOT" ]]; then
+    echo "No git repository found at $INSTALL_DIR."
+    echo "Configure a remote and reinstall from source, or copy updates manually."
+    exit 1
+  fi
+
+  REMOTE=$(cd "$REPO_ROOT" && git remote 2>/dev/null | head -1)
+  if [[ -z "$REMOTE" ]]; then
+    echo "No git remote configured for this installation."
+    echo "Add a remote to your checkout, then run: kitelon -u"
+    exit 1
+  fi
+
+  echo -e "$KL_C_INFO[$KL_RESET${KL_C_ERR}i${KL_RESET}$KL_C_INFO] Pull updates from $REMOTE and reinstall? (y or n)$KL_RESET"
+  read ans
+  if [[ "$ans" = "y" ]] || [[ "$ans" = "Y" ]]; then
+    cd "$REPO_ROOT"
+    git pull "$REMOTE" "$(git branch --show-current 2>/dev/null || echo master)"
+    bash "$REPO_ROOT/install.sh" force
+    exit
+  fi
+}
+
+if [[ "$UPDATE" = "1" ]]; then
+  update
+  exit
+fi
+
+function check_online {
+  if curl --connect-timeout 3 -s https://github.com >/dev/null 2>&1; then
+    ONLINE="1"
+    echo -e "$KL_C_INFO[*]$KL_RESET Checking for active internet connection $KL_C_INFO[$KL_RESET${KL_C_OK}OK${KL_RESET}$KL_C_INFO]$KL_RESET"
+  else
+    ONLINE="0"
+    echo -e "$KL_C_INFO[*]$KL_RESET Checking for active internet connection $KL_C_INFO[$KL_RESET${KL_C_ERR}FAIL${KL_RESET}$KL_C_INFO]"
+    echo -e "$KL_C_INFO[$KL_RESET${KL_C_ERR}i${KL_RESET}$KL_C_INFO]$KL_RESET kitelon is running in offline mode.$KL_RESET"
+  fi
+}
+
+# COMMAND LINE SWITCHES
+DB_SUBCMD=""
+JOBS_SUBCMD=""
+WORKSPACES_SUBCMD=""
+WEB_MODE=""
+POSITIONAL=()
+while [[ $# -gt 0 ]]
+do
+key="$1"
+
+case $key in
+    -h|--help)
+    kl_help
+    shift
+    ;;
+    -c|--config)
+    CONFIG="$2"
+    echo -e "$KL_C_INFO[*]$KL_RESET Creating backup of existing config to /root/.kitelon.conf.bak...$KL_C_INFO[$KL_RESET${KL_C_OK}OK${KL_RESET}$KL_C_INFO]$KL_RESET"
+    cp -f /root/.kitelon.conf /root/.kitelon.conf.bak 2>/dev/null
+    echo -e "$KL_C_INFO[*]$KL_RESET Copying $CONFIG to /root/.kitelon.conf...$KL_C_INFO[$KL_RESET${KL_C_OK}OK${KL_RESET}$KL_C_INFO]$KL_RESET"
+    cp -f $CONFIG /root/.kitelon.conf 2> /dev/null
+    dos2unix /root/.kitelon.conf 2> /dev/null > /dev/null
+    source /root/.kitelon.conf
+    sleep 1
+    shift
+    shift
+    ;;
+    -t)
+    TARGET="$2"
+    shift
+    shift
+    ;;
+    -b)
+    AUTO_BRUTE="1"
+    shift
+    ;;
+    -fp|--fullportscan)
+    FULLNMAPSCAN="1"
+    shift
+    ;;
+    -o|--osint)
+    OSINT="1"
+    shift
+    ;;
+    -re|--recon)
+    RECON="1"
+    shift
+    ;;
+    --testssl)
+    TESTSSL="1"
+    shift
+    ;;
+    --testssl-only)
+    TESTSSL_ONLY="1"
+    shift
+    ;;
+    --force)
+    TESTSSL_FORCE="1"
+    shift
+    ;;
+    --reports)
+    TESTSSL_REPORTS="1"
+    shift
+    ;;
+    -m)
+    MODE="$2"
+    shift
+    shift
+    ;;
+    -p)
+    PORT="$2"
+    shift
+    shift
+    ;;
+    -f|--file)
+    FILE="$(realpath $2)"
+    shift
+    shift
+    ;;
+    -ri|--reimport)
+    REIMPORT="1"
+    shift
+    ;;
+    -rl|--reload)
+    RELOAD="1"
+    shift
+    ;;
+    -n|--noreport)
+    REPORT="0"
+    shift
+    ;;
+    -nl|--noloot)
+    LOOT="0"
+    NOLOOT="1"
+    shift
+    ;;
+    -w)
+    WORKSPACE="$2"
+    kitelon_apply_workspace
+    shift
+    shift
+    ;;
+    -s|--schedule)
+    if [[ -z "$WORKSPACE" ]]; then
+      echo "You need to set a workspace via the -w switch to schedule a scan task."
+      exit
+    fi
+    if [[ -z "$TARGET" ]]; then
+      echo "You need to set a target via -t to schedule a scan."
+      exit
+    fi
+    SCHEDULE_ARG="$2"
+    if [[ "${DB_ENABLED:-1}" == "1" ]]; then
+      MODE="${MODE:-normal}"
+      export PYTHONPATH="$INSTALL_DIR/bin${PYTHONPATH:+:$PYTHONPATH}"
+      python3 "$INSTALL_DIR/bin/kitelon_db.py" schedule \
+        --workspace "$WORKSPACE" \
+        --cron "$SCHEDULE_ARG" \
+        --target "$TARGET" \
+        --mode "$MODE" \
+        --loot-root "$INSTALL_DIR/loot" || exit 1
+      echo -e "$KL_C_OK[✓]$KL_RESET Scheduled cron scan ($SCHEDULE_ARG): $TARGET ($MODE) in workspace $WORKSPACE"
+      exit 0
+    fi
+    echo "Scheduling requires DB_ENABLED=1 and PostgreSQL."
+    exit 1
+    ;;
+    db)
+    DB_SUBCMD="$2"
+    shift 2
+    if [[ "$DB_SUBCMD" == "import" && $# -gt 0 && "$1" != -* ]]; then
+      WORKSPACE="$1"
+      kitelon_apply_workspace
+      shift
+    fi
+    ;;
+    jobs)
+    JOBS_SUBCMD="$2"
+    shift
+    shift
+    ;;
+    workspaces)
+    WORKSPACES_SUBCMD="$2"
+    shift
+    shift
+    ;;
+    --web)
+    WEB_MODE="1"
+    shift
+    ;;
+    -d|--delete)
+    kl_print_header
+    if [[ -z "$WORKSPACE" ]]; then
+      echo "You need to specify a workspace via -w to delete."
+      exit 1
+    fi
+    echo "Remove workspace $WORKSPACE? Loot on disk will be deleted. (Ctrl+C to abort)"
+    read -r ANS
+    export PYTHONPATH="$INSTALL_DIR/bin${PYTHONPATH:+:$PYTHONPATH}"
+    kitelon_export_db_env
+    if [[ "${DB_ENABLED:-1}" == "1" ]]; then
+      python3 "$INSTALL_DIR/bin/kitelon_crud.py" workspaces delete "$WORKSPACE" --delete-loot || exit 1
+      echo -e "$KL_C_OK[✓]$KL_RESET Workspace $WORKSPACE removed (database + loot)"
+    else
+      rm -Rf "$INSTALL_DIR/loot/workspace/$WORKSPACE/"
+      echo "Workspace $INSTALL_DIR/loot/workspace/$WORKSPACE/ was removed."
+    fi
+    if [[ "$WORKSPACE" != "default" ]]; then
+      mkdir -p "$INSTALL_DIR/loot/workspace/default"
+    fi
+    exit
+    shift
+    ;;
+    -dh|--delete-host)
+    echo "Removing $TARGET from $WORKSPACE"
+    sed -i "/$TARGET/d" "$WORKSPACE_DIR"/domains/* "$WORKSPACE_DIR"/reports/host-table-report.csv
+    egrep -R "$TARGET" "$WORKSPACE_DIR"/domains/* "$WORKSPACE_DIR"/reports/host-table-report.csv
+    rm -f "$WORKSPACE_DIR"/screenshots/"$TARGET"*.jpg 2> /dev/null
+    rm -f "$WORKSPACE_DIR"/nmap/dns-"$TARGET".txt 2> /dev/null
+    rm -f "$WORKSPACE_DIR"/nmap/ports-"$TARGET".txt 2> /dev/null
+    rm -f "$WORKSPACE_DIR"/artifacts/nmap/"$TARGET".xml 2> /dev/null
+    rm -f "$WORKSPACE_DIR"/artifacts/web/"$TARGET"/* 2> /dev/null
+    rm -f "$WORKSPACE_DIR"/findings.jsonl 2> /dev/null
+    exit
+    shift
+    ;;
+    -dt|--delete-task)
+    echo "Removing all running $TARGET tasks from $WORKSPACE"
+    rm -vf $WORKSPACE_DIR/scans/running_$TARGET_*.txt
+    ls -lh $LOOT_DIR/scans/running_*.txt 2> /dev/null | wc -l 2> /dev/null > $WORKSPACE_DIR/scans/tasks-running.txt 2> /dev/null
+    ps -ef | egrep "$TARGET|kitelon"
+    ps -ef | egrep "kitelon" | awk '{print $2}' | xargs -r sudo kill -9 {}
+    exit
+    shift
+    ;;
+    --list)
+    kl_print_header
+    ls -l $INSTALL_DIR/loot/workspace/
+    echo ""
+    echo "cd /usr/share/kitelon/loot/workspace/"
+    WEB_URL="http://${WEB_BIND:-127.0.0.1}:${WEB_PORT:-8080}"
+    if [[ -n "$WORKSPACE" ]]; then
+      kl_section "Opening workspace in Web UI..."
+      $BROWSER "${WEB_URL}/workspace.html?alias=${WORKSPACE}" 2> /dev/null > /dev/null &
+    else
+      kl_section "Opening Kitelon Web UI..."
+      $BROWSER "${WEB_URL}/" 2> /dev/null > /dev/null &
+    fi
+    exit
+    shift
+    ;;
+    --export)
+    if [[ -z "$WORKSPACE" ]]; then
+      echo "You need to set a workspace via the -w switch to export a workspace."
+      exit
+    fi
+    export PYTHONPATH="$INSTALL_DIR/bin${PYTHONPATH:+:$PYTHONPATH}"
+    kitelon_export_db_env
+    OUT="${EXPORT_OUTPUT:-$INSTALL_DIR/loot/kitelon-${WORKSPACE}.zip}"
+    python3 "$INSTALL_DIR/bin/kitelon_workspace_pack.py" export "$WORKSPACE" --output "$OUT" --loot-root "$INSTALL_DIR/loot" || exit 1
+    echo "Exported $WORKSPACE to $OUT"
+    exit
+    shift
+    ;;
+    --import-zip)
+    IMPORT_ZIP="$2"
+    shift
+    shift
+    ;;
+    --replace)
+    IMPORT_REPLACE="1"
+    shift
+    ;;
+    -s|--status)
+    kitelon_status
+    exit
+    shift
+    ;;
+    --is-running)
+    kitelon_is_running_cmd
+    exit $?
+    shift
+    ;;
+    --stop)
+    kitelon_stop_cmd
+    exit $?
+    shift
+    ;;
+    -u|--update)
+    UPDATE="1"
+    update
+    exit
+    shift
+    ;;
+    -rr|--resume)
+    RESUME="1"
+    shift
+    ;;
+    *)
+    # jobs/workspaces/db forward remaining tokens (aliases, --limit, --json, …)
+    if [[ -n "$JOBS_SUBCMD" || -n "$WORKSPACES_SUBCMD" || -n "$DB_SUBCMD" ]]; then
+      POSITIONAL+=("$1")
+      shift
+      continue
+    fi
+    echo "Unknown scan option $1...refer to the kl_help menu for usage details."
+    exit 1
+    ;;
+esac
+done
+set -- "${POSITIONAL[@]}"
+
+kitelon_export_db_env() {
+  export DB_ENABLED="${DB_ENABLED:-1}"
+  export DB_HOST="${DB_HOST:-127.0.0.1}"
+  export DB_PORT="${DB_PORT:-5432}"
+  export DB_NAME="${DB_NAME:-kitelon}"
+  export DB_USER="${DB_USER:-postgres}"
+}
+
+if [[ -n "$DB_SUBCMD" ]]; then
+  export PYTHONPATH="$INSTALL_DIR/bin${PYTHONPATH:+:$PYTHONPATH}"
+  kitelon_export_db_env
+  case "$DB_SUBCMD" in
+    migrate)
+      python3 "$INSTALL_DIR/bin/kitelon_db.py" migrate || exit 1
+      echo -e "$KL_C_OK[✓]$KL_RESET PostgreSQL schema migrated"
+      ;;
+    migrate-loot)
+      python3 "$INSTALL_DIR/bin/kitelon_db.py" migrate-loot --loot-root "$INSTALL_DIR/loot" || exit 1
+      ;;
+    migrate-artifacts)
+      python3 "$INSTALL_DIR/bin/kitelon_db.py" migrate-artifacts --loot-root "$INSTALL_DIR/loot" "$@" || exit 1
+      ;;
+    test)
+      python3 "$INSTALL_DIR/bin/kitelon_db.py" test || exit 1
+      echo -e "$KL_C_OK[✓]$KL_RESET PostgreSQL connection OK"
+      ;;
+    prune-workspaces)
+      python3 "$INSTALL_DIR/bin/kitelon_db.py" prune-workspaces --loot-root "$INSTALL_DIR/loot" || exit 1
+      ;;
+    fix-loot-layout)
+      python3 "$INSTALL_DIR/bin/kitelon_db.py" fix-loot-layout --loot-root "$INSTALL_DIR/loot" || exit 1
+      ;;
+    import)
+      if [[ -z "$WORKSPACE" ]]; then
+        echo "Usage: kitelon db import <WORKSPACE_ALIAS>"
+        exit 1
+      fi
+      kitelon_apply_workspace
+      LOOT_DIR="${WORKSPACE_DIR:-$INSTALL_DIR/loot/workspace/$WORKSPACE}"
+      if [[ ! -d "$LOOT_DIR" ]]; then
+        echo -e "$KL_C_ERR[!]$KL_RESET Workspace loot directory not found: $LOOT_DIR"
+        exit 1
+      fi
+      kl_section "Importing loot and rebuilding reports for $WORKSPACE..."
+      python3 "$INSTALL_DIR/bin/kitelon_loot.py" --loot-dir "$LOOT_DIR" --workspace "$WORKSPACE" --action all \
+        || exit 1
+      echo -e "$KL_C_OK[✓]$KL_RESET Imported loot and regenerated reports for $WORKSPACE"
+      ;;
+    *)
+      echo "Usage: kitelon db migrate | migrate-loot | migrate-artifacts | test | import <WORKSPACE> | prune-workspaces | fix-loot-layout"
+      exit 1
+      ;;
+  esac
+  exit 0
+fi
+
+if [[ -n "$WORKSPACES_SUBCMD" ]]; then
+  export PYTHONPATH="$INSTALL_DIR/bin${PYTHONPATH:+:$PYTHONPATH}"
+  kitelon_export_db_env
+  python3 "$INSTALL_DIR/bin/kitelon_crud.py" workspaces "$WORKSPACES_SUBCMD" "$@" || exit 1
+  exit 0
+fi
+
+if [[ -n "$IMPORT_ZIP" ]]; then
+  export PYTHONPATH="$INSTALL_DIR/bin${PYTHONPATH:+:$PYTHONPATH}"
+  kitelon_export_db_env
+  REPLACE_FLAG=""
+  [[ -n "$IMPORT_REPLACE" ]] && REPLACE_FLAG="--replace"
+  ALIAS_FLAG=""
+  [[ -n "$WORKSPACE" ]] && ALIAS_FLAG="--alias $WORKSPACE"
+  python3 "$INSTALL_DIR/bin/kitelon_workspace_pack.py" import "$IMPORT_ZIP" $ALIAS_FLAG $REPLACE_FLAG --loot-root "$INSTALL_DIR/loot" || exit 1
+  exit 0
+fi
+
+if [[ -n "$JOBS_SUBCMD" ]]; then
+  export PYTHONPATH="$INSTALL_DIR/bin${PYTHONPATH:+:$PYTHONPATH}"
+  kitelon_export_db_env
+  if [[ "$JOBS_SUBCMD" == "enqueue" ]]; then
+    if [[ -z "$TARGET" ]] || [[ -z "$WORKSPACE" ]]; then
+      echo "Usage: kitelon jobs enqueue -t <TARGET> -w <WORKSPACE> [-m MODE]"
+      exit 1
+    fi
+    MODE="${MODE:-normal}"
+    python3 "$INSTALL_DIR/bin/kitelon_crud.py" jobs create \
+      --type scan --workspace "$WORKSPACE" --target "$TARGET" --mode "$MODE" \
+      --created-by cli || exit 1
+    echo -e "$KL_C_OK[✓]$KL_RESET Enqueued scan job for $TARGET (workspace $WORKSPACE)"
+    exit 0
+  fi
+  python3 "$INSTALL_DIR/bin/kitelon_crud.py" jobs "$JOBS_SUBCMD" "$@" || exit 1
+  exit 0
+fi
+
+if [[ "$WEB_MODE" == "1" ]]; then
+  export KITELON_INSTALL_DIR="$INSTALL_DIR"
+  export KITELON_BIN="$_KITELON_BIN"
+  export KITELON_WEB_ROOT="$INSTALL_DIR/web"
+  export KITELON_LOOT_ROOT="$INSTALL_DIR/loot"
+  export WEB_BIND="${WEB_BIND:-127.0.0.1}"
+  export WEB_PORT="${WEB_PORT:-8080}"
+  export WEB_API_KEY="${WEB_API_KEY:-}"
+  export PYTHONPATH="$INSTALL_DIR/bin${PYTHONPATH:+:$PYTHONPATH}"
+  echo -e "$KL_C_INFO[*]$KL_RESET Starting Kitelon Web UI at http://${WEB_BIND}:${WEB_PORT}"
+  exec python3 "$INSTALL_DIR/bin/kitelon_api.py"
+fi
+
+if [[ ! -z "$TARGET" ]] && [[ -z "$WORKSPACE" ]]; then
+  echo -e "$KL_C_ERR[!]$KL_RESET You need to set a workspace via the -w switch."
+  exit 1
+fi
+kitelon_apply_workspace
+
+if [[ -z "$TARGET" ]] && [[ -z "$WORKSPACE" ]]; then
+  kl_print_header
+  echo "You need to specify a target or workspace to use. Type kitelon --help for command usage."
+  exit
+fi
+
+cd $INSTALL_DIR
+
+function init {
+  kitelon_apply_workspace
+  WORKSPACE_ROOT="$INSTALL_DIR/loot/workspace"
+  if [[ -n "$WORKSPACE_DIR" ]] && [[ "$WORKSPACE_DIR" != "$WORKSPACE_ROOT" ]]; then
+    LOOT_DIR="$WORKSPACE_DIR"
+  fi
+  echo -e "$KL_C_INFO[*]$KL_RESET Saving loot to $LOOT_DIR $KL_C_INFO[$KL_RESET${KL_C_OK}OK${KL_RESET}$KL_C_INFO]$KL_RESET"
+  kitelon_init_workspace_dirs "$LOOT_DIR"
+  TARGET="$(echo $TARGET | sed 's/https:\/\///g' | sed 's/http:\/\///g')"
+  rm -f /tmp/out_of_scope 2> /dev/null
+  for key in "${OUT_OF_SCOPE[@]}"; do echo $TARGET | egrep ${key} >> /tmp/out_of_scope 2> /dev/null; done;
+  OUT_OF_SCOPE_NUM=$(wc -l /tmp/out_of_scope 2> /dev/null | awk '{print $1}' 2> /dev/null)
+  if [[ $OUT_OF_SCOPE_NUM > 0 ]]; then
+    echo -e "$KL_C_INFO[$KL_RESET${KL_C_ERR}i${KL_RESET}$KL_C_INFO] $TARGET is out of scope. Skipping! $KL_RESET"
+    exit
+  else
+    echo -e "$KL_C_INFO[*]$KL_RESET Scanning $TARGET $KL_C_INFO[$KL_RESET${KL_C_OK}OK${KL_RESET}$KL_C_INFO]$KL_RESET"
+  fi
+}
+
+function loot {
+  if [[ ! $LOOT == "0" ]]; then
+    kitelon_banner
+    echo ""
+    if [[ -n "$WORKSPACE_DIR" ]]; then
+      LOOT_DIR=$WORKSPACE_DIR
+    fi
+    kitelon_init_workspace_dirs "$LOOT_DIR" || {
+      echo -e "$KL_C_ERR[!]$KL_RESET Loot directory unavailable: $LOOT_DIR"
+      return 1
+    }
+    if [[ "$LOOT_DB" == "1" ]] || [[ "$LOOT_REPORT" == "1" ]]; then
+      LOOT_ACTION="all"
+      [[ "$LOOT_DB" == "1" && "$LOOT_REPORT" != "1" ]] && LOOT_ACTION="import"
+      [[ "$LOOT_DB" != "1" && "$LOOT_REPORT" == "1" ]] && LOOT_ACTION="report"
+      kl_section "Building workspace database and reports..."
+      export PYTHONPATH="$INSTALL_DIR/bin${PYTHONPATH:+:$PYTHONPATH}"
+      python3 "$INSTALL_DIR/bin/kitelon_loot.py" --loot-dir "$LOOT_DIR" --workspace "$WORKSPACE" --action "$LOOT_ACTION" \
+        || echo -e "$KL_C_ERR[!]$KL_RESET Loot import/report failed."
+    fi
+    if [[ -f "$LOOT_DIR/kitelon-report.html" ]] && [[ "$REPORT" != "0" ]] && [[ "$NOLOOT" != "1" ]]; then
+      kl_section "Opening workspace report..."
+      $BROWSER "$LOOT_DIR/kitelon-report.html" 2> /dev/null > /dev/null &
+    fi
+    if [[ -f "$POST_LOOT_HOOK" ]]; then
+      source "$POST_LOOT_HOOK"
+    fi
+    kl_section "Done."
+  fi
+}
+
+function kitelon_run_scan {
+  kl_require_authorized_use
+  init
+  export PYTHONPATH="$INSTALL_DIR/bin${PYTHONPATH:+:$PYTHONPATH}"
+  SCAN_CMD=(python3 "$INSTALL_DIR/bin/kitelon_scan.py" --target "$TARGET" --mode "${MODE:-normal}")
+  [[ -n "$WORKSPACE" ]] && SCAN_CMD+=(--workspace "$WORKSPACE")
+  [[ "$RESUME" == "1" ]] && SCAN_CMD+=(--resume)
+  [[ "$OSINT" == "1" ]] && SCAN_CMD+=(--osint)
+  [[ "$RECON" == "1" ]] && SCAN_CMD+=(--recon)
+  [[ "$FULLNMAPSCAN" == "1" ]] && SCAN_CMD+=(--full-port)
+  [[ "$TESTSSL" == "1" ]] && SCAN_CMD+=(--testssl)
+  [[ -n "$PORT" ]] && SCAN_CMD+=(--port "$PORT")
+  [[ -n "$FILE" ]] && SCAN_CMD+=(--target-file "$FILE")
+  "${SCAN_CMD[@]}"
+  SCAN_EXIT=$?
+  if [[ $SCAN_EXIT -eq 0 ]] && [[ "$LOOT" != "0" ]] && [[ -n "$WORKSPACE" ]]; then
+    loot
+  fi
+  exit $SCAN_EXIT
+}
+
+if [[ "$REIMPORT" = "1" ]]; then
+  if [[ ! -z "$WORKSPACE_DIR" ]]; then
+    LOOT="1"
+    loot
+    exit
+  fi
+fi
+
+if [[ "$TESTSSL_ONLY" = "1" ]]; then
+  kl_require_authorized_use
+  if [[ -z "$TARGET" ]] || [[ -z "$WORKSPACE" ]]; then
+    echo -e "$KL_C_ERR[!]$KL_RESET --testssl-only requires -t <TARGET> and -w <WORKSPACE>"
+    exit 1
+  fi
+  kitelon_init_workspace_dirs "$WORKSPACE_DIR"
+  export PYTHONPATH="$INSTALL_DIR/bin${PYTHONPATH:+:$PYTHONPATH}"
+  kitelon_export_db_env
+  TESTSSL_PORT="${PORT:-443}"
+  TESTSSL_ARGS=(
+    run
+    --workspace "$WORKSPACE"
+    --target "$TARGET"
+    --port "$TESTSSL_PORT"
+    --loot-dir "$WORKSPACE_DIR"
+    --install-dir "$INSTALL_DIR"
+  )
+  [[ -n "$TESTSSL_FORCE" ]] && TESTSSL_ARGS+=(--force)
+  [[ -n "$TESTSSL_REPORTS" ]] && TESTSSL_ARGS+=(--reports)
+  python3 "$INSTALL_DIR/bin/kitelon_testssl.py" "${TESTSSL_ARGS[@]}" || exit 1
+  echo -e "$KL_C_OK[✓]$KL_RESET testssl evidence saved to workspace $WORKSPACE"
+  exit 0
+fi
+
+if [[ "$RELOAD" = "1" ]]; then
+  if [[ ! -z "$WORKSPACE_DIR" ]]; then
+    $BROWSER $WORKSPACE_DIR/kitelon-report.html 2> /dev/null > /dev/null &
+    exit
+  fi
+fi
+
+if [[ -n "$TARGET" ]]; then
+  kitelon_run_scan
+fi
+
+exit 0

@@ -1,0 +1,53 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+*.egg-info/
+.eggs/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Scan output (keep loot/README.md)
+loot/workspace/
+loot/**/*
+!loot/README.md
+
+# Local / runtime config (never commit secrets)
+/kitelon.conf
+.kitelon.conf
+.kitelon_api_keys.conf
+.kitelon_db.conf
+*.env
+.env.*
+
+# Install-time plugin clones (large third-party trees)
+/plugins/
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# Temp / scratch
+*.log
+*.tmp
+*.bak
+/tmp/
+
+# Archives produced locally
+*.tar.gz
+*.zip
+!wordlists/*.txt

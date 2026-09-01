@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Kitelon
+Encoding=UTF-8
+Exec=bash-wrapper "sudo kitelon"
+StartupNotify=false
+Terminal=true
+Type=Application
+Categories=08-exploitation-tools;02-vulnerability-analysis;01-info-gathering;
+Comment=Offensive security recon and scan orchestrator

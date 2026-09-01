@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kitelon: Workspaces</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1>Kitelon</h1>
+    <nav>
+      <a href="/" class="active">Workspaces</a>
+      <a href="/jobs.html">Jobs</a>
+      <a href="/schedules.html">Schedules</a>
+    </nav>
+  </header>
+  <main>
+    <form id="create-workspace">
+      <h2 style="margin:0;color:#fff;font-size:1rem">New workspace</h2>
+      <label>Alias
+        <input name="alias" data-workspace-input required placeholder="myscope">
+        <span class="field-hint">Letters, digits, . _ - only (no spaces)</span>
+      </label>
+      <button type="submit">Create</button>
+    </form>
+    <div class="import-zip-row">
+      <label>Import workspace ZIP
+        <input type="file" id="import-zip-file" accept=".zip,application/zip">
+      </label>
+      <label>Alias override (optional)
+        <input type="text" id="import-zip-alias" data-workspace-input placeholder="leave blank to use zip">
+      </label>
+      <label class="option-item" style="flex-direction:row;align-items:center;gap:.35rem">
+        <input type="checkbox" id="import-zip-replace"> Replace existing
+      </label>
+      <button type="button" id="import-zip-btn" class="secondary">Import ZIP</button>
+    </div>
+    <p id="import-zip-msg" class="meta"></p>
+    <p id="status" class="meta"></p>
+    <div id="grid" class="card-grid"></div>
+    <p id="error" class="error"></p>
+  </main>
+  <script src="/static/app.js"></script>
+  <script>
+    const { api, el, stat, validateWorkspaceAlias, sanitizeWorkspaceAlias, upload } = KitelonUI;
+
+    async function load() {
+      const grid = document.getElementById("grid");
+      const err = document.getElementById("error");
+      const status = document.getElementById("status");
+      grid.innerHTML = "";
+      err.textContent = "";
+      try {
+        const [workspaces, st] = await Promise.all([
+          api("/api/v1/workspaces"),
+          api("/api/v1/status"),
+        ]);
+        status.textContent = "Scan running: " + (st.scan_running ? "yes" : "no");
+        if (!workspaces.length) {
+          grid.appendChild(el("p", "empty", "No workspaces yet. Create one above or run a scan with -w alias."));
+          return;
+        }
+        workspaces.forEach((ws) => {
+          const card = el("article", "card");
+          const title = el("h2", null, ws.alias);
+          const link = document.createElement("a");
+          link.href = "/workspace.html?alias=" + encodeURIComponent(ws.alias);
+          link.appendChild(title);
+          card.appendChild(link);
+          card.appendChild(el("p", "meta", ws.loot_path || ""));
+          const stats = el("div", "stats");
+          const s = ws.stats || {};
+          ["hosts_total", "vulnerabilities_total", "workspace_risk_score"].forEach((k) => {
+            stats.appendChild(stat(k.replace(/_/g, " "), s[k] || 0));
+          });
+          card.appendChild(stats);
+          const actions = el("div", "card-actions");
+          actions.style.display = "flex";
+          actions.style.gap = ".5rem";
+          actions.style.flexWrap = "wrap";
+          if (!ws.last_imported_at) {
+            const imp = document.createElement("button");
+            imp.type = "button";
+            imp.className = "secondary btn-sm";
+            imp.textContent = "Import loot";
+            imp.addEventListener("click", async (ev) => {
+              ev.preventDefault();
+              imp.disabled = true;
+              try {
+                await api("/api/v1/workspaces/" + encodeURIComponent(ws.alias) + "/import", {
+                  method: "POST",
+                  body: "{}",
+                });
+                imp.textContent = "Import queued";
+              } catch (e) {
+                imp.textContent = "Import failed";
+                imp.disabled = false;
+              }
+            });
+            actions.appendChild(imp);
+          }
+          const del = document.createElement("button");
+          del.type = "button";
+          del.className = "secondary btn-sm";
+          del.textContent = "Delete";
+          del.addEventListener("click", async () => {
+            if (!confirm("Delete workspace " + ws.alias + " and all loot?")) return;
+            del.disabled = true;
+            try {
+              await api("/api/v1/workspaces/" + encodeURIComponent(ws.alias) + "?delete_loot=true", {
+                method: "DELETE",
+              });
+              load();
+            } catch (e) {
+              document.getElementById("error").textContent = e.message;
+              del.disabled = false;
+            }
+          });
+          actions.appendChild(del);
+          const ren = document.createElement("button");
+          ren.type = "button";
+          ren.className = "secondary btn-sm";
+          ren.textContent = "Rename";
+          ren.addEventListener("click", async () => {
+            const newAlias = prompt("New workspace alias:", ws.alias);
+            if (!newAlias || newAlias === ws.alias) return;
+            try {
+              await api("/api/v1/workspaces/" + encodeURIComponent(ws.alias), {
+                method: "PATCH",
+                body: JSON.stringify({ alias: newAlias }),
+              });
+              load();
+            } catch (e) {
+              document.getElementById("error").textContent = e.message;
+            }
+          });
+          actions.appendChild(ren);
+          card.appendChild(actions);
+          grid.appendChild(card);
+        });
+      } catch (e) {
+        err.textContent = e.message;
+      }
+    }
+
+    document.getElementById("create-workspace").addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      const err = document.getElementById("error");
+      err.textContent = "";
+      const fd = new FormData(ev.target);
+      const alias = sanitizeWorkspaceAlias(fd.get("alias"));
+      const aliasErr = validateWorkspaceAlias(alias);
+      if (aliasErr) {
+        err.textContent = aliasErr;
+        return;
+      }
+      try {
+        const ws = await api("/api/v1/workspaces", {
+          method: "POST",
+          body: JSON.stringify({ alias }),
+        });
+        ev.target.reset();
+        if (ws.created) {
+          location.href = "/workspace.html?alias=" + encodeURIComponent(ws.alias);
+        } else {
+          err.textContent = "Workspace already exists: opening it.";
+          location.href = "/workspace.html?alias=" + encodeURIComponent(ws.alias);
+        }
+      } catch (e) {
+        err.textContent = e.message;
+      }
+    });
+
+    document.getElementById("import-zip-btn").addEventListener("click", async () => {
+      const input = document.getElementById("import-zip-file");
+      const msg = document.getElementById("import-zip-msg");
+      const btn = document.getElementById("import-zip-btn");
+      if (!input.files || !input.files[0]) {
+        msg.textContent = "Choose a ZIP file first.";
+        return;
+      }
+      const query = {};
+      const alias = sanitizeWorkspaceAlias(document.getElementById("import-zip-alias").value);
+      if (alias) query.alias = alias;
+      if (document.getElementById("import-zip-replace").checked) query.replace = "true";
+      btn.disabled = true;
+      msg.textContent = "Importing…";
+      try {
+        const result = await upload("/api/v1/workspaces/import-zip", input.files[0], query);
+        msg.textContent =
+          "Imported " + result.alias + " (" + result.hosts + " hosts, " +
+          result.vulnerabilities + " findings).";
+        input.value = "";
+        location.href = "/workspace.html?alias=" + encodeURIComponent(result.alias);
+      } catch (e) {
+        msg.textContent = e.message;
+        btn.disabled = false;
+      }
+    });
+
+    load();
+  </script>
+</body>
+</html>

@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kitelon: Schedules</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1>Scheduled scans</h1>
+    <nav>
+      <a href="/">Workspaces</a>
+      <a href="/jobs.html">Jobs</a>
+      <a href="/schedules.html" class="active">Schedules</a>
+    </nav>
+  </header>
+  <main>
+    <form id="create-schedule">
+      <h2 style="margin:0;color:#fff;font-size:1rem">New schedule</h2>
+      <label>Workspace
+        <input name="workspace" data-workspace-input required placeholder="myscope">
+      </label>
+      <label>Target<input name="target" required placeholder="example.com"></label>
+      <label>Cron (minute hour dom month dow)
+        <input name="cron" required placeholder="0 2 * * *" pattern="\S+\s+\S+\s+\S+\s+\S+\s+\S+"
+               title="5-field cron, e.g. 0 2 * * * for daily at 02:00">
+      </label>
+      <p class="muted" style="margin:0;font-size:0.85rem">
+        Examples: <code>0 2 * * *</code> daily 02:00 · <code>0 0 * * 0</code> weekly Sunday · <code>0 0 1 * *</code> monthly
+      </p>
+      <label>Mode
+        <select name="mode" id="sched-mode"></select>
+      </label>
+      <div id="sched-options"></div>
+      <button type="submit">Create schedule</button>
+    </form>
+
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th><th>Enabled</th><th>Workspace</th><th>Cron</th>
+          <th>Target</th><th>Mode</th><th>Next run</th><th></th>
+        </tr>
+      </thead>
+      <tbody id="schedules"></tbody>
+    </table>
+    <p id="error" class="error"></p>
+  </main>
+  <script src="/static/app.js"></script>
+  <script>
+    const {
+      api, validateWorkspaceAlias, sanitizeWorkspaceAlias,
+      scanOptionsFromForm, renderScanOptions, fillModeSelect, fillRow,
+    } = KitelonUI;
+
+    let scanConfig = null;
+
+    async function loadScanConfig() {
+      if (scanConfig) return scanConfig;
+      scanConfig = await api("/api/v1/scan-config");
+      fillModeSelect(document.getElementById("sched-mode"), scanConfig.modes);
+      renderScanOptions(document.getElementById("sched-options"), scanConfig.options, "sched");
+      return scanConfig;
+    }
+
+    async function loadSchedules() {
+      const tbody = document.getElementById("schedules");
+      const err = document.getElementById("error");
+      tbody.innerHTML = "";
+      err.textContent = "";
+      try {
+        const rows = await api("/api/v1/schedules");
+        rows.forEach((s) => {
+          const tr = document.createElement("tr");
+          fillRow(tr, [
+            s.id,
+            s.enabled ? "yes" : "no",
+            s.workspace_alias || "",
+            s.cron || s.cadence || "",
+            s.target,
+            s.mode || "",
+            s.next_run_at || "",
+          ]);
+          const act = document.createElement("td");
+          act.className = "job-actions";
+          const toggle = document.createElement("button");
+          toggle.type = "button";
+          toggle.className = "secondary btn-sm";
+          toggle.textContent = s.enabled ? "Pause" : "Enable";
+          toggle.addEventListener("click", async () => {
+            await api("/api/v1/schedules/" + s.id, {
+              method: "PATCH",
+              body: JSON.stringify({ enabled: !s.enabled }),
+            });
+            loadSchedules();
+          });
+          act.appendChild(toggle);
+          const del = document.createElement("button");
+          del.type = "button";
+          del.className = "secondary btn-sm";
+          del.textContent = "Delete";
+          del.addEventListener("click", async () => {
+            if (!confirm("Delete schedule #" + s.id + "?")) return;
+            await api("/api/v1/schedules/" + s.id, { method: "DELETE" });
+            loadSchedules();
+          });
+          act.appendChild(del);
+          tr.appendChild(act);
+          tbody.appendChild(tr);
+        });
+      } catch (e) {
+        err.textContent = e.message;
+      }
+    }
+
+    document.getElementById("create-schedule").addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      const fd = new FormData(ev.target);
+      const workspace = sanitizeWorkspaceAlias(fd.get("workspace"));
+      const aliasErr = validateWorkspaceAlias(workspace);
+      if (aliasErr) {
+        document.getElementById("error").textContent = aliasErr;
+        return;
+      }
+      const options = scanOptionsFromForm(ev.target);
+      try {
+        await api("/api/v1/schedules", {
+          method: "POST",
+          body: JSON.stringify({
+            workspace,
+            target: fd.get("target"),
+            cron: fd.get("cron"),
+            mode: fd.get("mode"),
+            options,
+          }),
+        });
+        ev.target.reset();
+        loadSchedules();
+      } catch (e) {
+        document.getElementById("error").textContent = e.message;
+      }
+    });
+
+    loadScanConfig().then(loadSchedules);
+    setInterval(loadSchedules, 20000);
+  </script>
+</body>
+</html>

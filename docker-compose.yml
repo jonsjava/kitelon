@@ -1,0 +1,110 @@
+# Kitelon stack: PostgreSQL + Web UI + job worker + recover sidecar.
+#
+#   cp docker/env.example .env   # set POSTGRES_PASSWORD
+#   docker compose build
+#   docker compose up -d
+#   open http://127.0.0.1:8080
+
+name: kitelon
+
+x-kitelon-env: &kitelon-env
+  KITELON_INSTALL_DIR: /usr/share/kitelon
+  DB_ENABLED: "1"
+  DB_HOST: postgres
+  DB_PORT: "5432"
+  DB_NAME: ${POSTGRES_DB:-kitelon}
+  DB_USER: ${POSTGRES_USER:-kitelon}
+  DB_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+  WEB_BIND: 0.0.0.0
+  WEB_PORT: "8080"
+  WEB_API_KEY: ${WEB_API_KEY:-}
+  LOG_DIR: /var/log/kitelon
+  LOG_STDERR: "1"
+
+x-kitelon-volumes: &kitelon-volumes
+  - kitelon_loot:/usr/share/kitelon/loot
+  - kitelon_logs:/var/log/kitelon
+
+x-kitelon-cap: &kitelon-cap
+  cap_add:
+    - NET_RAW
+    - NET_ADMIN
+
+services:
+  postgres:
+    image: postgres:16-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-kitelon}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-kitelon}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  kitelon-web:
+    build: .
+    image: kitelon:local
+    restart: unless-stopped
+    command: web
+    ports:
+      - "${KITELON_WEB_PORT:-8080}:8080"
+    environment: *kitelon-env
+    volumes: *kitelon-volumes
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/ >/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  kitelon-worker:
+    image: kitelon:local
+    restart: unless-stopped
+    command: worker
+    environment: *kitelon-env
+    volumes: *kitelon-volumes
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kitelon-web:
+        condition: service_started
+    <<: *kitelon-cap
+
+  kitelon-recover:
+    image: kitelon:local
+    restart: unless-stopped
+    command: recover-loop
+    environment:
+      <<: *kitelon-env
+      RECOVER_INTERVAL_SEC: "300"
+    volumes: *kitelon-volumes
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # One-off scans (not started by default):
+  #   docker compose --profile scan run --rm kitelon-scan -- -t example.com -w demo
+  kitelon-scan:
+    profiles: [scan]
+    image: kitelon:local
+    entrypoint: ["/usr/local/bin/kitelon-entrypoint.sh", "scan"]
+    environment: *kitelon-env
+    volumes: *kitelon-volumes
+    depends_on:
+      postgres:
+        condition: service_healthy
+    <<: *kitelon-cap
+
+volumes:
+  postgres_data:
+  kitelon_loot:
+  kitelon_logs:

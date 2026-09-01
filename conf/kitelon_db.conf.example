@@ -1,0 +1,10 @@
+# Copy to /root/.kitelon_db.conf (chmod 600): never commit real passwords.
+#
+# Required:
+DB_PASSWORD=change_me
+#
+# Optional overrides (defaults from /root/.kitelon.conf):
+# DB_USER=postgres
+# DB_HOST=127.0.0.1
+# DB_PORT=5432
+# DB_NAME=kitelon

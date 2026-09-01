@@ -1,0 +1,17 @@
+[Unit]
+Description=Kitelon post-process worker (import + reports)
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /usr/share/kitelon/bin/kitelon_worker.py run
+Restart=always
+RestartSec=5
+Environment=KITELON_INSTALL_DIR=/usr/share/kitelon
+Environment=KITELON_BIN=/usr/share/kitelon/kitelon
+Environment=WORKER_ROLE=post
+Environment=WORKER_POST_CONCURRENCY=3
+
+[Install]
+WantedBy=multi-user.target

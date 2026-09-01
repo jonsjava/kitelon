@@ -1,0 +1,37 @@
+.git
+.gitignore
+.pytest_cache
+.mypy_cache
+.ruff_cache
+__pycache__
+*.py[cod]
+.venv
+venv
+env
+*.egg-info
+.coverage
+htmlcov
+
+# Local secrets and runtime config (root only; keep docker/kitelon.conf)
+/kitelon.conf
+.kitelon.conf
+.kitelon_db.conf
+.kitelon_api_keys.conf
+*.env
+.env.*
+
+# Scan output (large; use volumes at runtime)
+loot/workspace/
+loot/**/*
+!loot/README.md
+
+# Install-time plugin clones on the host (image runs install.sh instead)
+plugins/
+
+# Archives and scratch
+*.tar.gz
+*.zip
+*.log
+*.tmp
+*.bak
+/tmp
