@@ -27,6 +27,7 @@ Initial public release (0.3.4).
 - Docker stack: `Dockerfile`, `docker-compose.yml`, `docker/entrypoint.sh`
 
 ### Operator notes
+- README documents project motivation and independence from Sn1per
 - `kitelon workspaces create <alias>` and `kitelon jobs list --limit` treat extra args as command arguments, not scan flags
 - `ensure_workspace` creates the loot layout so new workspaces are not pruned on list
 - `GET /api/v1/workspaces` syncs from disk without deleting workspace rows

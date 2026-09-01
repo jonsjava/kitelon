@@ -2,6 +2,24 @@
 
 Kitelon is open-source security automation software (MIT License).
 
+## Independence
+
+Kitelon is **not** Sn1per, not a fork of Sn1per, and not a substitute for
+Sn1per Professional or any other commercial scanner platform. README.md
+explains the motivation: a maintained, self-hostable orchestrator for
+authorized testing and learning when a paid product is not available.
+
+Similarity in workflow (workspace loot, scan modes, bundled third-party tools)
+reflects a common product category, not copied Sn1per source code. README.md
+describes the public Sn1per CE repo as infrequently updated compared to Sn1per
+Professional; Kitelon does not claim Sn1per is abandoned.
+
+## Authorship
+
+I'm a DevOps engineer. I built Kitelon with substantial help from AI coding
+tools. It is a personal hobby project, not professional front-end or product
+work; README.md explains the rationale in more detail.
+
 ## Intended use
 
 Kitelon is provided for **educational purposes** and **authorized security testing only**. You must have explicit permission before scanning any target you do not own. See [docs/LEGAL.md](docs/LEGAL.md).

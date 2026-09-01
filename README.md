@@ -5,9 +5,39 @@ reconnaissance, vulnerability scanning, and reporting in lab and engagement
 contexts. It orchestrates engine-integrated security tools through a CLI-first
 workflow with workspace-based loot management.
 
+## Why Kitelon
+
+Kitelon is an **independent** open-source project (MIT). It is **not**
+affiliated with, endorsed by, or derived from the [Sn1per](https://github.com/1N3/Sn1per)
+product or its authors.
+
+The public Sn1per **community edition** on GitHub is **updated infrequently**
+and is **not the main development line**. Recent commits are largely
+documentation and marketing; the **last GitHub release (v9.2) was in July
+2023**. Ongoing work is centered on **Sn1per Professional**, a commercial
+product. That is a poor fit for students, home labs, and teams who need
+multi-tool scan automation to learn defensive security or to exercise
+**systems they own or are authorized to test**, without buying a platform
+license.
+
+Kitelon targets that gap with a **new** stack: Python pipelines, a PostgreSQL
+job queue, background workers, cron schedules, and a local Web UI. Scan modes
+and workspace loot follow the same **orchestrator** pattern many operators
+already know from tools in this category; the source here is Kitelon-authored,
+not a Sn1per fork or rebrand.
+
 > **Authorized use only.** Kitelon is for educational purposes and permitted
 > security testing. Scan only systems you own or are explicitly authorized to
 > assess. See [docs/LEGAL.md](docs/LEGAL.md) and [NOTICE.md](NOTICE.md).
+
+## How it was built
+
+I'm a **DevOps engineer**. I built Kitelon with **heavy assistance from AI
+coding tools** (implementation, documentation, and Web UI). This is a **hobby
+project**, not a day job or commercial product. My background is DevOps,
+infrastructure, and tool orchestration, not front-end development; I used AI
+help so a working local Web UI and docs could ship in spare time without
+overstating the scope of the effort.
 
 ## Install
 
