@@ -25,9 +25,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--recon", "-re", action="store_true", help="Enable recon modules")
     parser.add_argument("--full-port", "-fp", action="store_true", help="Full port scan")
     parser.add_argument("--port", "-p", type=int, help="Single port")
-    parser.add_argument("--testssl", action="store_true", help="Enable testssl")
-    parser.add_argument("--ffuf", action="store_true", help="Enable ffuf dir brute")
-    parser.add_argument("--preset", help="Load conf/presets/<name>.conf overrides")
+    parser.add_argument("--testssl", "-ts", action="store_true", help="Enable testssl")
+    parser.add_argument("--ffuf", "-fu", action="store_true", help="Enable ffuf dir brute")
+    parser.add_argument("--preset", "-pr", help="Load conf/presets/<name>.conf overrides")
     parser.add_argument("--target-file", "-f", help="File of targets for mass modes")
     parser.add_argument("--job-id", type=int, default=None, help="Optional queue job id")
     return parser

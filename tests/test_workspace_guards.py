@@ -103,8 +103,14 @@ def test_sanitize_extra_args_rejects_preset_and_port_traversal():
     assert sanitize_extra_args(["--preset", ".hidden"]) == []
     assert sanitize_extra_args(["-p", "notaport"]) == []
     assert sanitize_extra_args(["-p", "99999"]) == []
+    assert sanitize_extra_args(["-pr", "web-quick", "-p", "443"]) == [
+        "-pr",
+        "web-quick",
+        "-p",
+        "443",
+    ]
     assert sanitize_extra_args(["--preset", "web-quick", "-p", "443"]) == [
-        "--preset",
+        "-pr",
         "web-quick",
         "-p",
         "443",

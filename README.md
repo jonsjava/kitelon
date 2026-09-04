@@ -50,9 +50,9 @@ sudo bash install.sh
 
 Install location: `/usr/share/kitelon`
 
-CLI command: `kitelon`
+CLI command: `kitelon` (one-off scans and scripting)
 
-Interactive console: `kitelon-cli` (see [docs/CLI.md](docs/CLI.md))
+Interactive console: `kitelon-cli` (workspaces, jobs, schedules, DB — see [Interactive CLI](#interactive-cli-kitelon-cli) below)
 
 ### Docker
 
@@ -97,6 +97,43 @@ sudo kitelon -t example.com -w myproject
 sudo kitelon --list
 ```
 
+## Interactive CLI (`kitelon-cli`)
+
+The bash `kitelon` driver is for one-off scans and scripting. **`kitelon-cli` is the
+full operator console** for everything else: same PostgreSQL job queue and scan engine
+as the Web UI, in a persistent REPL with chaining, session state, and tab completion.
+
+```bash
+sudo kitelon-cli
+sudo kitelon-cli -c 'db test && workspace list'
+sudo kitelon-cli --no-intro -c 'use lab && scan -t scanme.nmap.org -m normal -o -re -pr osint-deep'
+```
+
+**Session.** `use <workspace>` sets the default workspace for `scan`, `jobs`, and
+`schedule` (prompt shows `kitelon[alias]>`). `context` prints the active workspace
+and last enqueued job id.
+
+**Command chains.** Separate statements with `;` (always continue) or `&&` (stop on
+failure), e.g. `workspace create demo && use demo && scan -t example.com`.
+
+| Area | What you can do |
+|------|-----------------|
+| **Scan** | All engine modes (`-m`), flags (`-o`, `-re`, `-rr`, `-fp`, `-ts`, `-fu`, `-p`), presets (`-pr osint-deep`), foreground run (`--sync`), or queue + block (`--wait`) |
+| **Workspace** | `list`, `create`, `update`, `delete`, `rename-host`; `show` hosts, findings, SSL (testssl summaries, open HTML), services, tech stack, URLs, scan runs |
+| **Jobs** | `list`, `show`, `create`, `update`, `delete`, `retry`, `wait` (including `wait --last` after a scan) |
+| **Schedules** | Cron-based recurring scans (`schedule create` with the same scan flags as `scan`) |
+| **Database** | `migrate`, `test`, `import`, `prune-workspaces`, `fix-loot-layout` |
+
+**Help.** `help` or `help scan` for modes and options; append `help` to any command
+(`workspace show help`, `jobs wait help`) for context-specific usage.
+
+**Tab completion.** Double-tab lists flags with helper text; `-t`, `-w`, `-m`, `-pr`,
+and `-p` suggest values with descriptions (recent targets, workspaces, modes,
+presets, common ports).
+
+Queued scans need `kitelon_worker` running; `--sync` runs in the foreground and
+imports loot when finished (no worker required). Full reference: [docs/CLI.md](docs/CLI.md).
+
 ## Scan modes
 
 | Mode | Description |
@@ -107,8 +144,8 @@ sudo kitelon --list
 | `web-deep` | Deep HTTP/HTTPS scan (optional ZAP) |
 | `web-http` / `web-https` | Web stack on a single port (set `-p`) |
 | `discover` | CIDR walk; scan each live host |
-| `recon` | Subdomain enumeration and light port scan |
-| `osint` | WHOIS and OSINT collectors |
+| `recon` | Subdomain enumeration, dnsrecon, archived URLs (gau) |
+| `osint` | WHOIS, theHarvester, optional Shodan/Censys/metagoofil |
 | `allports` | All TCP ports, then web on 80/443 |
 | `ports-only` | Full port scan without follow-on modules |
 | `ports-quick` | Light port scan only |
@@ -130,7 +167,7 @@ Run `sudo kitelon --help` for the full command reference.
 - API keys: `/root/.kitelon_api_keys.conf`
 - Presets: `conf/` directory
 
-During install, if `kitelon.conf` exists in the installer directory it is used; otherwise the installer prompts for settings and creates one. See `examples/kitelon.conf` for a documented reference of all options. PostgreSQL credentials are written to `/root/.kitelon.conf` and `/root/.kitelon_db.conf` when provided.
+During install, if `kitelon.conf` exists in the installer directory it is used; otherwise the installer prompts for settings and creates one. See `examples/kitelon.conf` for a documented reference of all options. OSINT API keys (`SHODAN_API_KEY`, `CENSYS_*`) and recon limits (`GAU_MAX_URLS`, `SHODAN_MAX_RESULTS`, etc.) are configurable; preset `osint-deep` raises caps for lab use. PostgreSQL credentials are written to `/root/.kitelon.conf` and `/root/.kitelon_db.conf` when provided.
 
 ## Loot and workspaces
 
@@ -249,7 +286,7 @@ API key: set `WEB_API_KEY` in `/root/.kitelon_api_keys.conf` (sent as `X-API-Key
 | Workspaces | `POST /api/v1/workspaces` `{alias}` | `GET /api/v1/workspaces`, `GET .../{alias}` | `PATCH .../{alias}` `{alias}` | `DELETE .../{alias}?delete_loot=true` |
 | Jobs | `POST /api/v1/jobs` | `GET /api/v1/jobs`, `GET .../{id}` | `PATCH .../{id}` pending only | `DELETE .../{id}?kill=true` if running |
 
-CLI equivalents: `kitelon workspaces list|show|create|update|delete` and `kitelon jobs list|show|create|update|delete|retry`.
+CLI equivalents: `kitelon workspaces list|show|create|update|delete` and `kitelon jobs list|show|create|update|delete|retry`. The interactive console **`kitelon-cli`** exposes the same queue and enriched workspace views with chaining, session workspace, tab completion, and context help — see [docs/CLI.md](docs/CLI.md).
 
 **Schedules:** `GET/POST /api/v1/schedules`, `GET/PATCH/DELETE /api/v1/schedules/{id}`: Web UI at `/schedules.html`.
 

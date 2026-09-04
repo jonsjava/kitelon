@@ -14,6 +14,7 @@ Chain with `;` (always continue) or `&&` (continue on success):
 
 ```text
 kitelon> workspace create demo && use demo && scan -t scanme.nmap.org -m normal
+kitelon[demo]> scan -t example.com -m normal -o -re -pr osint-deep
 kitelon[demo]> scan -t example.com && jobs wait --last
 ```
 
@@ -36,7 +37,9 @@ context                  # show workspace + last job id
 | `schedule list\|show\|create\|delete` | Cron schedules (5-field syntax) |
 | `db migrate\|test\|import\|prune-workspaces\|fix-loot-layout` | DB maintenance |
 
-Scan options: `--resume`, `--osint`, `--recon`, `--fullportscan`, `--testssl`, `-p PORT`. Run `help scan` in the REPL for modes.
+Scan options: `-rr`, `-o`, `-re`, `-fp`, `-pr`, `-ts`, `-fu`, `-p`. With `-o` / `-re`, the engine runs dnsrecon, gau, Shodan/Censys (when API keys are set), and related modules. Run `help scan` in the REPL for modes and preset details.
+
+Tab completion (double-tab) shows helper text for flags and descriptions for `-t`, `-w`, `-m`, `-pr`, and `-p` values when run in an interactive TTY.
 
 Append `help` to any command for usage, e.g. `workspace show help`, `jobs wait help`.
 

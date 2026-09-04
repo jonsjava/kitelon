@@ -118,7 +118,7 @@ function kl_help {
 $star QUICK START (authorized targets only)
  kitelon -w <WORKSPACE> -t <TARGET>
  kitelon -w <WORKSPACE> -t <TARGET> -m stealth -o -re
- kitelon -w <WORKSPACE> -t <TARGET> -m normal
+ kitelon -w <WORKSPACE> -t <TARGET> -m normal -o -re --preset osint-deep
 
 $star INTERACTIVE CONSOLE (recommended)
  kitelon-cli
@@ -212,7 +212,7 @@ kitelon_cmd_is_workload() {
     *"--reimport"*)
       return 0
       ;;
-    *" -t "*|*" -t"*|*" -f "*|*" -f"*|*" -m "*|*" -m"*|*" -fp"*|*" -b"*|*" -o"*|*" -re"*)
+    *" -t "*|*" -t"*|*" -f "*|*" -f"*|*" -m "*|*" -m"*|*" -fp"*|*" -b"*|*" -o"*|*" -re"*|*" --preset "*)
       return 0
       ;;
   esac
@@ -403,6 +403,11 @@ case $key in
     ;;
     -re|--recon)
     RECON="1"
+    shift
+    ;;
+    --preset)
+    PRESET="$2"
+    shift
     shift
     ;;
     --testssl)
@@ -809,6 +814,7 @@ function kitelon_run_scan {
   [[ "$RESUME" == "1" ]] && SCAN_CMD+=(--resume)
   [[ "$OSINT" == "1" ]] && SCAN_CMD+=(--osint)
   [[ "$RECON" == "1" ]] && SCAN_CMD+=(--recon)
+  [[ -n "$PRESET" ]] && SCAN_CMD+=(--preset "$PRESET")
   [[ "$FULLNMAPSCAN" == "1" ]] && SCAN_CMD+=(--full-port)
   [[ "$TESTSSL" == "1" ]] && SCAN_CMD+=(--testssl)
   [[ -n "$PORT" ]] && SCAN_CMD+=(--port "$PORT")

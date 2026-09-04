@@ -448,6 +448,7 @@ install_base_dependencies() {
             )
             
             pkg_install_optional theharvester
+            pkg_install_optional dnsrecon
             pip_install_pkg theHarvester || warn_optional "pip install theHarvester failed"
             ;;
             
@@ -521,6 +522,8 @@ setup_python() {
         ipaddress
         requests
         webtech
+        shodan
+        censys
         'psycopg[binary]'
         fastapi
         python-multipart
@@ -956,6 +959,14 @@ EOF
 
     # wafw00f: WAF fingerprinting (EnableSecurity; pip install from plugins clone)
     install_wafw00f || warn_optional "wafw00f install failed"
+
+    # metagoofil: metadata / file discovery OSINT
+    local metagoofil_repo="$PLUGINS_DIR/metagoofil"
+    kitelon_git_sync "metagoofil" https://github.com/laramies/metagoofil.git "$metagoofil_repo"
+    if [[ -f "$metagoofil_repo/metagoofil.py" ]]; then
+        chmod 755 "$metagoofil_repo/metagoofil.py" 2>/dev/null || chmod +x "$metagoofil_repo/metagoofil.py" || true
+        kl_msg_ok "metagoofil"
+    fi
     
     # Dirsearch: web path brute-forcer (git v0.4.3; flags match scan scripts)
     local dirsearch_repo="$PLUGINS_DIR/dirsearch"
@@ -1301,6 +1312,25 @@ ENABLE_WAFW00F="1"
 ENABLE_VULNERS="1"
 ENABLE_OS_DETECT="1"
 ENABLE_METASPLOIT="1"
+ENABLE_DNSRECON="1"
+ENABLE_METAGOOFILE="0"
+ENABLE_GAU="1"
+ENABLE_SHODAN="1"
+ENABLE_CENSYS="1"
+SHODAN_MAX_RESULTS="25"
+CENSYS_MAX_RESULTS="25"
+CENSYS_MODE="hosts"
+GAU_MAX_URLS="500"
+GAU_PROVIDERS="wayback"
+GAU_INCLUDE_SUBS="1"
+METAGOOFILE_LIMIT="25"
+METAGOOFILE_TYPES="pdf,doc,xls"
+DNSRECON_AXFR="0"
+DNSRECON_TIMEOUT="300"
+METAGOOFILE_TIMEOUT="600"
+GAU_TIMEOUT="300"
+SHODAN_TIMEOUT="60"
+CENSYS_TIMEOUT="60"
 MSF_MODULE_TIMEOUT="420"
 MSF_MAX_MODULES="12"
 NUCLEI_TEMPLATES="\$PLUGINS_DIR/nuclei-templates"

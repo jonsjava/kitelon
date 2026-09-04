@@ -16,9 +16,12 @@ Tests cover ffuf/webtech JSON parsers, findings schema, manifest resume logic, a
 Presets live under `conf/presets/`. Load at scan time:
 
 ```bash
-sudo kitelon-cli -c 'scan -t example.com -w demo --preset stealth'
+sudo kitelon-cli -c 'scan -t example.com -w demo -pr stealth'
 sudo kitelon -t example.com -w demo --preset web
+sudo kitelon -t example.com -w demo -o -re --preset osint-deep
 ```
+
+Presets include `osint-conservative` (default limits) and `osint-deep` (raised OSINT/recon caps).
 
 ## Engine toggles
 

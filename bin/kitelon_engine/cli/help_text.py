@@ -363,13 +363,13 @@ schedule create: add a recurring scan
 
 Usage:
   schedule create -w WORKSPACE --cron CRON -t TARGET [-m MODE]
-    [--osint] [--recon] [--fullportscan] [--testssl] [-p PORT]
+    [-o] [-re] [-pr PRESET] [-fp] [-ts] [-p PORT]
 
 Cron uses standard 5-field syntax (minute hour dom month dow).
 
 Examples:
   schedule create -w demo --cron "0 2 * * *" -t example.com
-  schedule create -w demo --cron "0 */6 * * *" -t scanme.nmap.org -m web
+  schedule create -w demo --cron "0 */6 * * *" -t scanme.nmap.org -m normal -o -re -pr osint-deep
 """,
         )
     elif sub == "delete":
@@ -403,9 +403,13 @@ Usage:
 
 Workspace is required: pass -w or `use <alias>` first.
 
+Options (see `help scan` for modes):
+  -o -re                   Enable OSINT and recon modules (dnsrecon, gau, Shodan/Censys, …)
+  -pr NAME                 Load conf/presets/ (osint-conservative, osint-deep)
+
 Examples:
   scan -t scanme.nmap.org -w scanme -m normal
-  use demo && scan -t example.com -m web --osint
+  use demo && scan -t example.com -m normal -o -re -pr osint-deep
   scan -t example.com -w demo --sync
   scan -t example.com -w demo && jobs wait --last
 """,

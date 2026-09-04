@@ -15,6 +15,7 @@ Install path defaults: `/usr/share/kitelon/plugins`, Go binaries in `~/go/bin` â
 | nikto | https://github.com/sullo/nikto | apt (Debian) / optional (RHEL) | **Engine** `ENABLE_NIKTO` |
 | whois | distro | apt/dnf/pacman/brew | **Engine** OSINT (`--osint` / `-o`) |
 | theHarvester | https://github.com/laramies/theHarvester | apt optional + pip | **Engine** OSINT |
+| dnsrecon | https://github.com/darkoperator/dnsrecon | apt optional | **Engine** `ENABLE_DNSRECON` |
 | wkhtmltopdf | https://wkhtmltopdf.org | apt/brew | **Report**: `report.py` / pdfkit |
 | metasploit | https://github.com/rapid7/metasploit-framework | omnibus installer / brew / pacman | **Engine** `ENABLE_METASPLOIT`: auxiliary scanners via `msfconsole` |
 | enum4linux-ng | https://github.com/cddmp/enum4linux-ng | apt optional; else git+pip | **Engine** `ENABLE_ENUM4LINUX` (port 445) |
@@ -38,6 +39,11 @@ Go **1.27.0** is installed from [go.dev](https://go.dev/doc/install) into `/usr/
 | katana | https://github.com/projectdiscovery/katana | `ENABLE_KATANA` |
 | tlsx | https://github.com/projectdiscovery/tlsx | `ENABLE_TLSX` |
 | gobuster | https://github.com/OJ/gobuster | `ENABLE_GOBUSTER` |
+| gau | https://github.com/lc/gau | `ENABLE_GAU` |
+
+### OSINT / recon limits (0.3.5)
+
+Configurable in `kitelon.conf`: `SHODAN_MAX_RESULTS`, `CENSYS_MAX_RESULTS`, `CENSYS_MODE`, `GAU_MAX_URLS`, `GAU_PROVIDERS`, `METAGOOFILE_LIMIT`, `DNSRECON_AXFR`, and related timeouts. Preset `osint-deep` raises caps; stock defaults stay conservative.
 
 ### Metasploit auxiliary scanners
 
@@ -61,6 +67,8 @@ After nmap, Kitelon imports the host into the MSF workspace DB and runs **auxili
 | fastapi / uvicorn / psycopg / croniter / cmd2 | Kitelon API, DB, CLI, worker |
 | pdfkit | PDF report export (with wkhtmltopdf) |
 | dnspython, requests, tldextract, colorama, urllib3 | Engine / loot helpers |
+| shodan | **Engine** `ENABLE_SHODAN` + `SHODAN_API_KEY` |
+| censys | **Engine** `ENABLE_CENSYS` + `CENSYS_APP_ID` / `CENSYS_API_SECRET` |
 
 ---
 
@@ -71,6 +79,7 @@ After nmap, Kitelon imports the host into the MSF workspace DB and runs **auxili
 | testssl.sh | https://github.com/drwetter/testssl.sh | **Engine** `ENABLE_TESTSSL`; wrapper at `/usr/local/bin/testssl.sh` |
 | wafw00f | https://github.com/EnableSecurity/wafw00f | pip install from clone |
 | dirsearch | https://github.com/maurosoria/dirsearch (**v0.4.3**) | **Engine** `ENABLE_DIRSEARCH` |
+| metagoofil | https://github.com/laramies/metagoofil | **Engine** `ENABLE_METAGOOFILE` (opt-in) |
 | ssh-audit | https://github.com/jtesta/ssh-audit | **Engine** `ENABLE_SSH_AUDIT` (port 22) |
 | enum4linux-ng | https://github.com/cddmp/enum4linux-ng | apt or git fallback: see above |
 | nuclei-templates | updated by `nuclei -update-templates` during install | `NUCLEI_TEMPLATES` path |

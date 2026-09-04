@@ -24,6 +24,25 @@ CRON_EXAMPLES = (
 
 JOB_STATUSES = ("pending", "running", "completed", "failed", "cancelled")
 
+PRESET_DESCRIPTIONS: dict[str, str] = {
+    "osint-conservative": "Stock OSINT/recon limits; metagoofil off",
+    "osint-deep": "Raised caps for lab use; metagoofil on",
+    "normal": "Full pipeline; recon options off by default",
+    "stealth": "Fewer threads, lighter brute force",
+    "web": "Web-focused modules on 80/443",
+}
+
+COMMON_PORTS: dict[str, str] = {
+    "22": "SSH",
+    "25": "SMTP",
+    "80": "HTTP",
+    "443": "HTTPS",
+    "8080": "HTTP alternate",
+    "8443": "HTTPS alternate",
+    "3306": "MySQL",
+    "5432": "PostgreSQL",
+}
+
 
 def _cached(session: SessionContext, key: str, ttl: float, loader):
     now = time.monotonic()
@@ -33,6 +52,13 @@ def _cached(session: SessionContext, key: str, ttl: float, loader):
     value = loader()
     session._cache[key] = {"ts": now, "value": value}
     return value
+
+
+def _completion_items(items: Iterable[tuple[str, str]], *, sort: bool = True) -> list[CompletionItem]:
+    out = [CompletionItem(value, display_meta=meta) for value, meta in items]
+    if sort:
+        out.sort(key=lambda item: str(item.value))
+    return out
 
 
 def workspace_aliases(session: SessionContext) -> list[str]:
@@ -81,10 +107,79 @@ def preset_names() -> list[str]:
     return list_presets(default_install_dir())
 
 
+def _preset_description(name: str) -> str:
+    return PRESET_DESCRIPTIONS.get(name, "Load conf/presets overrides")
+
+
+def _workspace_summary(stats: dict[str, int] | None) -> str:
+    if not stats:
+        return "workspace"
+    hosts = stats.get("hosts", 0)
+    services = stats.get("services", 0)
+    if hosts or services:
+        return f"{hosts} hosts, {services} services"
+    return "workspace"
+
+
+def mode_choices_provider(cmd_app, arg_tokens=None) -> Choices:
+    return Choices(_completion_items(mode_descriptions().items()))
+
+
 def preset_choices_provider(cmd_app, arg_tokens=None) -> Choices:
-    return Choices.from_values(preset_names())
+    items = ((name, _preset_description(name)) for name in preset_names())
+    return Choices(_completion_items(items))
 
 
 def workspace_choices_provider(cmd_app, arg_tokens=None) -> Choices:
-    """Argparse choices_provider for -w / --workspace."""
-    return Choices.from_values(workspace_aliases(cmd_app.session))
+    def load() -> list[CompletionItem]:
+        with get_connection() as conn:
+            rows = list_workspaces(conn)
+        return [
+            CompletionItem(
+                ws["alias"],
+                display_meta=_workspace_summary(ws.get("stats")),
+            )
+            for ws in rows
+        ]
+
+    return Choices(_cached(cmd_app.session, "workspace_items", 5.0, load))
+
+
+def target_choices_provider(cmd_app, arg_tokens=None) -> Choices:
+    def load() -> list[CompletionItem]:
+        with get_connection() as conn:
+            rows = list_jobs(conn, limit=50)
+        seen: set[str] = set()
+        items: list[CompletionItem] = []
+        for row in rows:
+            target = str(row.get("target") or "").strip()
+            if not target or target in seen:
+                continue
+            seen.add(target)
+            ws = row.get("workspace_alias") or "-"
+            mode = row.get("mode") or "normal"
+            status = row.get("status") or "?"
+            items.append(
+                CompletionItem(
+                    target,
+                    display_meta=f"{ws} · {mode} · job #{row['id']} ({status})",
+                )
+            )
+        return items
+
+    return Choices(_cached(cmd_app.session, "recent_targets", 5.0, load))
+
+
+def port_choices_provider(cmd_app, arg_tokens=None) -> Choices:
+    return Choices(_completion_items(COMMON_PORTS.items(), sort=False))
+
+
+def job_status_choices_provider(cmd_app, arg_tokens=None) -> Choices:
+    labels = {
+        "pending": "Queued, not started",
+        "running": "Worker is executing",
+        "completed": "Finished successfully",
+        "failed": "Finished with error",
+        "cancelled": "Stopped or removed",
+    }
+    return Choices(_completion_items((status, labels[status]) for status in JOB_STATUSES))

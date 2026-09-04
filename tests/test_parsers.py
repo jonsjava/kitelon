@@ -145,12 +145,12 @@ def test_sanitize_extra_args_blocks_injection():
             "options": {"resume": True, "ffuf": True, "preset": "../../../etc/passwd"},
         }
     )
-    assert merged["extra_args"] == ["-rr", "--ffuf"]
+    assert merged["extra_args"] == ["-rr", "-fu"]
 
-    stored = merge_job_scan_args({"extra_args": ["-rr", "--ffuf"]}, trust_extra=True)
-    assert stored["extra_args"] == ["-rr", "--ffuf"]
+    stored = merge_job_scan_args({"extra_args": ["-rr", "-fu"]}, trust_extra=True)
+    assert stored["extra_args"] == ["-rr", "-fu"]
 
-    dropped = merge_job_scan_args({"extra_args": ["-rr", "--ffuf"]})
+    dropped = merge_job_scan_args({"extra_args": ["-rr", "-fu"]})
     assert dropped["extra_args"] == []
 
 

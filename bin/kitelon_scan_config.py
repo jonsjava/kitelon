@@ -13,8 +13,8 @@ SCAN_MODES: list[dict[str, str]] = [
     {"id": "web-http", "label": "Web HTTP", "description": "Web stack on one HTTP port (use port option)"},
     {"id": "web-https", "label": "Web HTTPS", "description": "Web stack on one HTTPS port (use port option)"},
     {"id": "discover", "label": "Discover", "description": "Network discovery (CIDR)"},
-    {"id": "recon", "label": "Recon", "description": "Subdomain enum and light port scan"},
-    {"id": "osint", "label": "OSINT", "description": "Open-source intelligence"},
+    {"id": "recon", "label": "Recon", "description": "Subdomain enum (subfinder, dnsx), dnsrecon, gau URL history"},
+    {"id": "osint", "label": "OSINT", "description": "whois, theHarvester; optional Shodan/Censys (API keys), metagoofil (preset/config)"},
     {"id": "allports", "label": "All ports", "description": "Full TCP port scan, then web on 80/443"},
     {"id": "ports-only", "label": "Ports only", "description": "Full port scan without follow-on modules"},
     {"id": "ports-quick", "label": "Ports quick", "description": "Light port scan only"},
@@ -32,17 +32,28 @@ VALID_MODE_IDS = frozenset(m["id"] for m in SCAN_MODES)
 
 SCAN_OPTIONS: list[dict[str, Any]] = [
     {"id": "resume", "label": "Resume", "description": "Skip steps that already have loot", "type": "bool", "flag": "-rr"},
-    {"id": "osint", "label": "OSINT", "description": "Enable OSINT modules (-o)", "type": "bool", "flag": "-o"},
-    {"id": "recon", "label": "Recon", "description": "Enable recon modules (-re)", "type": "bool", "flag": "-re"},
+    {"id": "osint", "label": "OSINT", "description": "Enable OSINT modules: whois, theHarvester, Shodan/Censys when keyed (-o)", "type": "bool", "flag": "-o"},
+    {"id": "recon", "label": "Recon", "description": "Enable recon modules: subfinder, dnsx, dnsrecon, gau (-re)", "type": "bool", "flag": "-re"},
     {"id": "fullportscan", "label": "Full port scan", "description": "Scan all ports (-fp)", "type": "bool", "flag": "-fp"},
-    {"id": "testssl", "label": "SSL/TLS scan", "description": "Run testssl.sh on HTTPS targets", "type": "bool", "flag": "--testssl"},
-    {"id": "ffuf", "label": "ffuf dir brute", "description": "Run ffuf path discovery alongside dirsearch", "type": "bool", "flag": "--ffuf"},
-    {"id": "preset", "label": "Preset", "description": "Load scan preset from conf/presets/", "type": "string", "flag": "--preset"},
+    {"id": "testssl", "label": "SSL/TLS scan", "description": "Run testssl.sh on HTTPS targets", "type": "bool", "flag": "-ts"},
+    {"id": "ffuf", "label": "ffuf dir brute", "description": "Run ffuf path discovery alongside dirsearch", "type": "bool", "flag": "-fu"},
+    {"id": "preset", "label": "Preset", "description": "Load conf/presets/ (e.g. osint-conservative, osint-deep)", "type": "string", "flag": "-pr"},
     {"id": "port", "label": "Port", "description": "Limit to a specific port", "type": "number", "flag": "-p"},
 ]
 
 _ALLOWED_FLAGS = {spec["flag"] for spec in SCAN_OPTIONS}
 _FLAG_VALUE = {spec["flag"]: spec["type"] != "bool" for spec in SCAN_OPTIONS}
+_LEGACY_FLAG_MAP = {
+    "--preset": "-pr",
+    "--testssl": "-ts",
+    "--ffuf": "-fu",
+    "--resume": "-rr",
+    "--osint": "-o",
+    "--recon": "-re",
+    "--fullportscan": "-fp",
+}
+_ALLOWED_FLAGS |= set(_LEGACY_FLAG_MAP)
+_FLAG_VALUE.update({legacy: _FLAG_VALUE.get(canonical, False) for legacy, canonical in _LEGACY_FLAG_MAP.items()})
 _PRESET_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _FORBIDDEN_FLAGS = frozenset(
     {
@@ -111,30 +122,31 @@ def sanitize_extra_args(tokens: list[str] | str | None) -> list[str]:
     i = 0
     while i < len(tokens):
         tok = tokens[i]
-        if tok in _FORBIDDEN_FLAGS or tok not in _ALLOWED_FLAGS:
+        canonical = _LEGACY_FLAG_MAP.get(tok, tok)
+        if tok in _FORBIDDEN_FLAGS or canonical not in _ALLOWED_FLAGS:
             i += 1
             continue
-        if _FLAG_VALUE.get(tok):
+        if _FLAG_VALUE.get(canonical):
             if i + 1 >= len(tokens):
                 i += 1
                 continue
             val = tokens[i + 1]
-            if tok == "--preset":
+            if canonical == "-pr":
                 preset = _valid_preset(val)
                 if preset is None:
                     i += 2
                     continue
                 val = preset
-            if tok == "-p":
+            if canonical == "-p":
                 port = _valid_port(val)
                 if port is None:
                     i += 2
                     continue
                 val = port
-            out.extend([tok, val])
+            out.extend([canonical, val])
             i += 2
             continue
-        out.append(tok)
+        out.append(canonical)
         i += 1
     return out
 

@@ -2,6 +2,21 @@
 
 All notable changes to Kitelon are documented here.
 
+## [0.3.5] - 2026-09-04
+
+### OSINT / recon
+- Engine hooks: **dnsrecon**, **gau**, optional **metagoofil**, **Shodan**, **Censys** (upstream tools only)
+- Conservative defaults in `kitelon.conf`; raise limits via config or `--preset osint-deep`
+- Presets: `osint-conservative`, `osint-deep`
+- Loot artifacts under `artifacts/recon/`: `dnsrecon.json`, `gau-urls.txt`, `shodan.json`, `censys.json`, `metagoofil/`
+
+### Install
+- `install.sh`: dnsrecon (apt), metagoofil git plugin, gau (Go), `shodan` + `censys` pip packages
+
+### CLI
+- `kitelon` bash driver: forward `-o`, `-re`, and `--preset` to the engine
+- `kitelon-cli`: scan flags use short forms (`-o`, `-re`, `-pr`, …); descriptive tab completion for targets, modes, presets, workspaces, and ports; expanded help and README coverage
+
 ## [0.3.4] - 2026-09-01
 
 Initial public release (0.3.4).

@@ -58,9 +58,12 @@ from kitelon_engine.cli.chain import has_chain, tokenize_chain
 from kitelon_engine.cli.completers import (
     CRON_EXAMPLES,
     JOB_STATUSES,
+    mode_choices_provider,
+    port_choices_provider,
     preset_choices_provider,
     recent_job_ids,
     recent_schedule_ids,
+    target_choices_provider,
     workspace_aliases,
     workspace_choices_provider,
 )
@@ -109,18 +112,29 @@ def _cli_history_file() -> str:
 
 
 def _add_scan_option_flags(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--resume", action="store_true", help="Skip completed pipeline steps")
-    parser.add_argument("--osint", action="store_true", help="Enable OSINT modules")
-    parser.add_argument("--recon", action="store_true", help="Enable recon modules")
-    parser.add_argument("--fullportscan", action="store_true", help="Scan all TCP ports")
-    parser.add_argument("--testssl", action="store_true", help="Run testssl on HTTPS targets")
-    parser.add_argument("--ffuf", action="store_true", help="Run ffuf path discovery")
+    parser.add_argument("-rr", dest="resume", action="store_true", help="Skip completed pipeline steps")
     parser.add_argument(
-        "--preset",
-        help="Scan preset from conf/presets/",
+        "-o",
+        dest="osint",
+        action="store_true",
+        help="OSINT: whois, theHarvester; Shodan/Censys when API keys set",
+    )
+    parser.add_argument(
+        "-re",
+        dest="recon",
+        action="store_true",
+        help="Recon: subfinder, dnsx, dnsrecon, gau",
+    )
+    parser.add_argument("-fp", dest="fullportscan", action="store_true", help="Scan all TCP ports")
+    parser.add_argument("-ts", dest="testssl", action="store_true", help="Run testssl on HTTPS targets")
+    parser.add_argument("-fu", dest="ffuf", action="store_true", help="Run ffuf path discovery")
+    parser.add_argument(
+        "-pr",
+        dest="preset",
+        help="Preset from conf/presets/ (osint-conservative, osint-deep, …)",
         choices_provider=preset_choices_provider,
     )
-    parser.add_argument("-p", "--port", type=int, help="Limit to a specific port")
+    parser.add_argument("-p", dest="port", type=int, help="Limit to a specific port", choices_provider=port_choices_provider)
 
 
 def _workspace_arg(parser: argparse.ArgumentParser, *, with_completion: bool = False) -> None:
@@ -135,6 +149,7 @@ class KitelonShell(Cmd):
         "Kitelon interactive CLI: chain commands with ; or &&\n"
         "Examples:\n"
         "  workspace create demo && use demo && scan -t scanme.nmap.org\n"
+        "  use demo && scan -t example.com -m normal -o -re -pr osint-deep\n"
         "  scan -t a.example.com ; scan -t b.example.com\n"
         "Type help or help <command> for details. Append help to any command for usage, e.g. workspace show help.\n"
         "Ctrl+C to exit."
@@ -332,9 +347,21 @@ class KitelonShell(Cmd):
     # --- scan ---
 
     scan_parser = Cmd2ArgumentParser()
-    scan_parser.add_argument("-t", "--target", required=True, help="Target host, domain, or CIDR")
+    scan_parser.add_argument(
+        "-t",
+        dest="target",
+        required=True,
+        help="Target host, domain, or CIDR",
+        choices_provider=target_choices_provider,
+    )
     _workspace_arg(scan_parser, with_completion=True)
-    scan_parser.add_argument("-m", "--mode", default="normal", choices=sorted(VALID_MODE_IDS))
+    scan_parser.add_argument(
+        "-m",
+        dest="mode",
+        default="normal",
+        help="Scan mode (default: normal)",
+        choices_provider=mode_choices_provider,
+    )
     _add_scan_option_flags(scan_parser)
     scan_parser.add_argument("--sync", action="store_true", help="Run scan in foreground and import loot")
     scan_parser.add_argument("--wait", action="store_true", help="Wait for queued job to finish")
@@ -573,7 +600,7 @@ class KitelonShell(Cmd):
                 return self._success()
             if not rows:
                 self.poutput(f"No SSL/TLS scans in workspace {alias}.")
-                self.poutput("Run: scan -t <TARGET> -w " + alias + " --testssl")
+                self.poutput("Run: scan -t <TARGET> -w " + alias + " -ts")
                 self.poutput("Or:  sudo kitelon -w " + alias + " -t <TARGET> --testssl-only")
                 return self._success()
             self.poutput(f"SSL/TLS scans in {alias}:")
@@ -637,7 +664,7 @@ class KitelonShell(Cmd):
     p.add_argument("--type", default="scan", choices=ALL_JOB_TYPES)
     p.add_argument("-w", "--workspace", choices_provider=workspace_choices_provider)
     p.add_argument("-t", "--target")
-    p.add_argument("-m", "--mode", default="normal")
+    p.add_argument("-m", dest="mode", default="normal", choices_provider=mode_choices_provider)
     p.add_argument("--priority", type=int, default=100)
     p.add_argument("--args", help="JSON object for job args")
 
@@ -645,7 +672,7 @@ class KitelonShell(Cmd):
     p.add_argument("id", type=int)
     p.add_argument("--priority", type=int)
     p.add_argument("-t", "--target")
-    p.add_argument("-m", "--mode")
+    p.add_argument("-m", dest="mode", choices_provider=mode_choices_provider)
     p.add_argument("--type", choices=ALL_JOB_TYPES)
     p.add_argument("-w", "--workspace")
     p.add_argument("--scheduled-at")
@@ -802,7 +829,7 @@ class KitelonShell(Cmd):
     _workspace_arg(p, with_completion=True)
     p.add_argument("--cron", required=True, help='5-field cron (e.g. "0 2 * * *")')
     p.add_argument("-t", "--target", required=True)
-    p.add_argument("-m", "--mode", default="normal", choices=sorted(VALID_MODE_IDS))
+    p.add_argument("-m", dest="mode", default="normal", help="Scan mode", choices_provider=mode_choices_provider)
     _add_scan_option_flags(p)
 
     p = sched_sub.add_parser("delete")
@@ -918,10 +945,16 @@ class KitelonShell(Cmd):
         for opt in SCAN_OPTIONS:
             flag = opt.get("flag") or ""
             self.poutput(f"  {opt['id']:14} {flag:8} {opt['description']}")
+        self.poutput("\nOSINT / recon (0.3.5):")
+        self.poutput("  -o         whois, theHarvester; Shodan/Censys when SHODAN_API_KEY / CENSYS_* set")
+        self.poutput("  -re        subfinder, dnsx, dnsrecon, gau (limits from kitelon.conf or preset)")
+        self.poutput("  -pr NAME   osint-conservative (stock caps) or osint-deep (raised caps, metagoofil on)")
         self.poutput("\nExecution:")
         self.poutput("  (default)  enqueue background job (worker imports loot)")
         self.poutput("  --sync     run scan in foreground, import loot when done")
         self.poutput("  --wait     block until queued job completes")
+        self.poutput("\nExample:")
+        self.poutput("  scan -t example.com -w demo -m normal -o -re -pr osint-deep")
         self.poutput("\nFor argparse flags: scan -h")
 
     # --- completion ---
