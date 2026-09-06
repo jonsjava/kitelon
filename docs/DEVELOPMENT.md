@@ -17,8 +17,17 @@ GitHub Actions workflows on every push and pull request to `main`:
 
 - [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) — **test** (`pytest tests/`)
 - [`.github/workflows/vet.yml`](../.github/workflows/vet.yml) — **vet** ([SafeDep vet](https://github.com/safedep/vet/releases) dependency scan; PRs scan changed manifests)
+- [`.github/workflows/malware-scan.yml`](../.github/workflows/malware-scan.yml) — **clamav** ([ClamAV](https://www.clamav.net/) file scan via [pompelmi](https://github.com/pompelmi/pompelmi))
 
-To require both before merging to `main`, enable branch protection on GitHub: **Settings → Branches → Branch protection rules → `main` → Require status checks** and select `test` and `vet`.
+To require all three before merging to `main`, enable branch protection on GitHub: **Settings → Branches → Branch protection rules → `main` → Require status checks** and select `test`, `vet`, and `clamav`.
+
+Local ClamAV scan (optional):
+
+```bash
+sudo apt install clamav
+sudo freshclam
+clamscan -r --infected --remove=no --exclude-dir='^\.git' --exclude-dir='^\.venv' .
+```
 
 Local vet scan (optional):
 
