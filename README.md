@@ -1,5 +1,8 @@
 # Kitelon
 
+[![Test Results](https://img.shields.io/github/actions/workflow/status/jonsjava/kitelon/test.yml?branch=main&label=test%20results)](https://github.com/jonsjava/kitelon/actions/workflows/test.yml)
+[![Version](https://img.shields.io/github/v/tag/jonsjava/kitelon?label=version)](https://github.com/jonsjava/kitelon/releases)
+
 Kitelon is a security automation platform for **authorized**
 reconnaissance, vulnerability scanning, and reporting in lab and engagement
 contexts. It orchestrates engine-integrated security tools through a CLI-first
