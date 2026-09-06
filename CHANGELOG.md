@@ -2,6 +2,27 @@
 
 All notable changes to Kitelon are documented here.
 
+## [Unreleased]
+
+## [0.3.6] - 2026-09-06
+
+### Modularity (plugin / addon / pack)
+- Plugin registry: `conf/plugins/registry.json`, `bin/kitelon_engine/plugin_registry.py`
+- Pack loader: `conf/packs/`, `bin/kitelon_engine/pack_loader.py`
+- Metasploit default scanner **pack**: `conf/packs/metasploit/scanners.json`
+- Recon pipeline driven by registry + `pipeline_hooks/recon.py` (respects per-plugin `ENABLE_*` flags)
+- Docs: `GLOSSARY.md`, `MODULARITY.md`, `PLUGINS.md`; updated `TOOLS.md`, `PIPELINES.md`, `DEVELOPMENT.md`, `README.md`
+
+### Storage
+- Artifact retrieval validates stored size against `LOOT_ARTIFACT_MAX_BYTES`
+- `store_file_from_disk` canonicalizes paths before computing relative paths
+
+### Workspace
+- Workspace alias normalization applies Unicode NFC before slash/space folding
+
+### Tests
+- `test_pack_loader.py`, `test_plugin_registry.py`, `test_recon_hooks.py`
+
 ## [0.3.5] - 2026-09-04
 
 ### OSINT / recon

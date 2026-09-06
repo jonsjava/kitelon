@@ -280,7 +280,10 @@ def normalize_severity(raw: str) -> str:
 
 
 def normalize_workspace_alias(alias: str) -> str:
-    alias = re.sub(r"[\s/]+", "-", alias.strip())
+    import unicodedata
+
+    alias = unicodedata.normalize("NFC", alias.strip())
+    alias = re.sub(r"[\s/]+", "-", alias)
     alias = re.sub(r"-+", "-", alias).strip("-")
     if not alias or ".." in alias or alias.startswith("."):
         raise ValueError("invalid workspace alias")

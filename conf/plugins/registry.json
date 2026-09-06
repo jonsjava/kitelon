@@ -1,0 +1,231 @@
+{
+  "plugins": [
+    {
+      "id": "nmap",
+      "label": "Nmap",
+      "wrapper": "nmap",
+      "config_option": "",
+      "always_on": true,
+      "pipelines": ["port", "normal", "stealth", "web", "allports"],
+      "order": 10,
+      "addons": ["vulners-nse", "os-detect"],
+      "packs": ["vulners-nse"]
+    },
+    {
+      "id": "naabu",
+      "label": "Naabu",
+      "wrapper": "naabu",
+      "config_option": "enable_naabu",
+      "pipelines": ["port", "normal"],
+      "order": 15
+    },
+    {
+      "id": "metasploit",
+      "label": "Metasploit",
+      "wrapper": "metasploit",
+      "config_option": "enable_metasploit",
+      "pipelines": ["port", "normal"],
+      "order": 20,
+      "addons": ["auxiliary-scanners"],
+      "packs": ["scanners"]
+    },
+    {
+      "id": "subfinder",
+      "label": "Subfinder",
+      "wrapper": "subfinder",
+      "config_option": "enable_subfinder",
+      "pipelines": ["recon", "normal"],
+      "order": 10
+    },
+    {
+      "id": "dnsx",
+      "label": "dnsx",
+      "wrapper": "dnsx",
+      "config_option": "enable_dnsx",
+      "pipelines": ["recon", "normal"],
+      "order": 20
+    },
+    {
+      "id": "dnsrecon",
+      "label": "dnsrecon",
+      "wrapper": "dnsrecon",
+      "config_option": "enable_dnsrecon",
+      "pipelines": ["recon", "normal"],
+      "order": 30
+    },
+    {
+      "id": "gau",
+      "label": "gau",
+      "wrapper": "gau",
+      "config_option": "enable_gau",
+      "pipelines": ["recon", "normal"],
+      "order": 40
+    },
+    {
+      "id": "whois",
+      "label": "WHOIS",
+      "wrapper": "osint",
+      "config_option": "",
+      "always_on": true,
+      "pipelines": ["osint"],
+      "order": 10
+    },
+    {
+      "id": "theharvester",
+      "label": "theHarvester",
+      "wrapper": "osint",
+      "config_option": "",
+      "always_on": true,
+      "pipelines": ["osint"],
+      "order": 20
+    },
+    {
+      "id": "metagoofil",
+      "label": "metagoofil",
+      "wrapper": "metagoofil",
+      "config_option": "enable_metagoofil",
+      "pipelines": ["osint"],
+      "order": 30
+    },
+    {
+      "id": "shodan",
+      "label": "Shodan",
+      "wrapper": "shodan",
+      "config_option": "enable_shodan",
+      "pipelines": ["osint"],
+      "order": 40
+    },
+    {
+      "id": "censys",
+      "label": "Censys",
+      "wrapper": "censys",
+      "config_option": "enable_censys",
+      "pipelines": ["osint"],
+      "order": 50
+    },
+    {
+      "id": "httpx",
+      "label": "httpx",
+      "wrapper": "httpx",
+      "config_option": "enable_httpx",
+      "pipelines": ["web", "normal"],
+      "order": 10
+    },
+    {
+      "id": "webtech",
+      "label": "webtech",
+      "wrapper": "webtech",
+      "config_option": "enable_webtech",
+      "pipelines": ["web", "normal"],
+      "order": 20
+    },
+    {
+      "id": "gowitness",
+      "label": "gowitness",
+      "wrapper": "gowitness",
+      "config_option": "enable_gowitness",
+      "pipelines": ["web", "normal"],
+      "order": 30
+    },
+    {
+      "id": "wafw00f",
+      "label": "wafw00f",
+      "wrapper": "wafw00f",
+      "config_option": "enable_wafw00f",
+      "pipelines": ["web", "normal"],
+      "order": 40
+    },
+    {
+      "id": "nuclei",
+      "label": "Nuclei",
+      "wrapper": "nuclei",
+      "config_option": "enable_nuclei",
+      "pipelines": ["web", "vuln", "normal"],
+      "order": 50,
+      "packs": ["templates"]
+    },
+    {
+      "id": "katana",
+      "label": "katana",
+      "wrapper": "katana",
+      "config_option": "enable_katana",
+      "pipelines": ["web", "normal"],
+      "order": 60
+    },
+    {
+      "id": "testssl",
+      "label": "testssl.sh",
+      "wrapper": "testssl",
+      "config_option": "enable_testssl",
+      "pipelines": ["web", "normal"],
+      "order": 70
+    },
+    {
+      "id": "tlsx",
+      "label": "tlsx",
+      "wrapper": "tlsx",
+      "config_option": "enable_tlsx",
+      "pipelines": ["web", "normal"],
+      "order": 80
+    },
+    {
+      "id": "nikto",
+      "label": "Nikto",
+      "wrapper": "nikto",
+      "config_option": "enable_nikto",
+      "pipelines": ["web", "normal"],
+      "order": 90
+    },
+    {
+      "id": "dirsearch",
+      "label": "dirsearch",
+      "wrapper": "gobuster",
+      "config_option": "enable_dirsearch",
+      "pipelines": ["web", "normal"],
+      "order": 100,
+      "packs": ["web-brute-common"]
+    },
+    {
+      "id": "gobuster",
+      "label": "gobuster",
+      "wrapper": "gobuster",
+      "config_option": "enable_gobuster",
+      "pipelines": ["web", "normal"],
+      "order": 110,
+      "packs": ["web-brute-common"]
+    },
+    {
+      "id": "ffuf",
+      "label": "ffuf",
+      "wrapper": "ffuf",
+      "config_option": "enable_ffuf",
+      "pipelines": ["web", "normal"],
+      "order": 120,
+      "packs": ["web-brute-common"]
+    },
+    {
+      "id": "enum4linux",
+      "label": "enum4linux-ng",
+      "wrapper": "smb",
+      "config_option": "enable_enum4linux",
+      "pipelines": ["service", "normal"],
+      "order": 10
+    },
+    {
+      "id": "smbmap",
+      "label": "smbmap",
+      "wrapper": "smb",
+      "config_option": "enable_smbmap",
+      "pipelines": ["service", "normal"],
+      "order": 20
+    },
+    {
+      "id": "ssh-audit",
+      "label": "ssh-audit",
+      "wrapper": "smb",
+      "config_option": "enable_ssh_audit",
+      "pipelines": ["service", "normal"],
+      "order": 30
+    }
+  ]
+}

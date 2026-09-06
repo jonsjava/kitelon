@@ -7,16 +7,15 @@ from pathlib import Path
 
 from kitelon_engine.context import ScanContext
 from kitelon_engine.findings import Finding, FindingWriter
+from kitelon_engine.pack_loader import PackError, load_pack
 from kitelon_engine.tools.base import run_cmd, which
 from kitelon_engine.tools.nmap_parse import parse_nmap_services
 
 MSF_LINE = re.compile(r"^\[\+\]\s*(.+)$", re.MULTILINE)
 MSF_VULN = re.compile(r"(VULNERABLE|CVE-\d{4}-\d+)", re.IGNORECASE)
 
-HTTP_PORTS = frozenset({80, 443, 8000, 8080, 8443, 8888})
-HTTP_SERVICES = frozenset({"http", "https", "ssl/http", "http-proxy", "http-alt", "ssl/http-proxy"})
-
-PORT_MODULES: dict[int, list[str]] = {
+# Fallback when pack file is missing (matches conf/packs/metasploit/scanners.json).
+_DEFAULT_PORT_MODULES: dict[int, list[str]] = {
     21: ["auxiliary/scanner/ftp/ftp_version"],
     25: ["auxiliary/scanner/smtp/smtp_version"],
     53: ["auxiliary/scanner/dns/dns_amp"],
@@ -33,19 +32,65 @@ PORT_MODULES: dict[int, list[str]] = {
     3389: ["auxiliary/scanner/rdp/rdp_scanner"],
     5985: ["auxiliary/scanner/winrm/winrm_auth_methods"],
 }
-
-HTTP_MODULES = [
+_DEFAULT_HTTP_PORTS = frozenset({80, 443, 8000, 8080, 8443, 8888})
+_DEFAULT_HTTP_SERVICES = frozenset(
+    {"http", "https", "ssl/http", "http-proxy", "http-alt", "ssl/http-proxy"}
+)
+_DEFAULT_HTTP_MODULES = [
     "auxiliary/scanner/http/http_version",
     "auxiliary/scanner/http/robots_txt",
 ]
 
 
-def modules_for_service(port: int, service: str) -> list[str]:
-    modules: list[str] = list(PORT_MODULES.get(port, []))
+def _scanner_pack(ctx: ScanContext) -> dict:
+    install_dir = str(ctx.install_dir)
+    try:
+        return load_pack(install_dir, "metasploit", "scanners")
+    except PackError:
+        return {
+            "port_modules": {str(k): v for k, v in _DEFAULT_PORT_MODULES.items()},
+            "http_ports": sorted(_DEFAULT_HTTP_PORTS),
+            "http_services": sorted(_DEFAULT_HTTP_SERVICES),
+            "http_modules": list(_DEFAULT_HTTP_MODULES),
+        }
+
+
+def _port_modules_from_pack(pack: dict) -> dict[int, list[str]]:
+    raw = pack.get("port_modules") or {}
+    out: dict[int, list[str]] = {}
+    for key, modules in raw.items():
+        try:
+            port = int(key)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(modules, list):
+            out[port] = [str(m) for m in modules]
+    return out or _DEFAULT_PORT_MODULES
+
+
+def modules_for_service(ctx: ScanContext | None, port: int, service: str) -> list[str]:
+    """Return Metasploit auxiliary modules for a port/service.
+
+    When ``ctx`` is None, built-in defaults are used (for unit tests).
+    Production scan paths always pass a ScanContext so pack JSON is loaded.
+    """
+    if ctx is not None:
+        pack = _scanner_pack(ctx)
+        port_modules = _port_modules_from_pack(pack)
+        http_ports = frozenset(int(p) for p in (pack.get("http_ports") or _DEFAULT_HTTP_PORTS))
+        http_services = frozenset(str(s).lower() for s in (pack.get("http_services") or _DEFAULT_HTTP_SERVICES))
+        http_modules = [str(m) for m in (pack.get("http_modules") or _DEFAULT_HTTP_MODULES)]
+    else:
+        port_modules = _DEFAULT_PORT_MODULES
+        http_ports = _DEFAULT_HTTP_PORTS
+        http_services = _DEFAULT_HTTP_SERVICES
+        http_modules = list(_DEFAULT_HTTP_MODULES)
+
+    modules: list[str] = list(port_modules.get(port, []))
     svc = (service or "").lower()
 
-    if port in HTTP_PORTS or svc in HTTP_SERVICES or "http" in svc:
-        modules.extend(HTTP_MODULES)
+    if port in http_ports or svc in http_services or "http" in svc:
+        modules.extend(http_modules)
 
     seen: set[str] = set()
     ordered: list[str] = []
@@ -167,7 +212,7 @@ def run_host_scanners(
     ran: list[dict[str, str | int]] = []
 
     for svc in services:
-        for module in modules_for_service(svc.port, svc.service):
+        for module in modules_for_service(ctx, svc.port, svc.service):
             if len(ran) >= max_modules:
                 ctx.log(f"metasploit: module cap ({max_modules}) reached for {host}")
                 break

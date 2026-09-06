@@ -1,0 +1,35 @@
+{
+  "plugin_id": "metasploit",
+  "pack_id": "default-scanners",
+  "label": "Default Metasploit auxiliary scanner pack",
+  "port_modules": {
+    "21": ["auxiliary/scanner/ftp/ftp_version"],
+    "25": ["auxiliary/scanner/smtp/smtp_version"],
+    "53": ["auxiliary/scanner/dns/dns_amp"],
+    "110": ["auxiliary/scanner/pop3/pop3_version"],
+    "143": ["auxiliary/scanner/imap/imap_version"],
+    "445": [
+      "auxiliary/scanner/smb/smb_version",
+      "auxiliary/scanner/smb/smb_ms17_010"
+    ],
+    "3306": ["auxiliary/scanner/mysql/mysql_version"],
+    "5432": ["auxiliary/scanner/postgres/postgres_version"],
+    "6379": ["auxiliary/scanner/redis/redis_server"],
+    "27017": ["auxiliary/scanner/mongodb/mongodb_login"],
+    "3389": ["auxiliary/scanner/rdp/rdp_scanner"],
+    "5985": ["auxiliary/scanner/winrm/winrm_auth_methods"]
+  },
+  "http_ports": [80, 443, 8000, 8080, 8443, 8888],
+  "http_services": [
+    "http",
+    "https",
+    "ssl/http",
+    "http-proxy",
+    "http-alt",
+    "ssl/http-proxy"
+  ],
+  "http_modules": [
+    "auxiliary/scanner/http/http_version",
+    "auxiliary/scanner/http/robots_txt"
+  ]
+}

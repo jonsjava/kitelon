@@ -35,7 +35,7 @@ loot/workspace/<alias>/
 | `osint` | `osint.run` | WHOIS + theHarvester |
 | `discover` | `discover.run` | CIDR discovery, then normal subset per host |
 | `allports` | `simple.allports` | nmap `-p-` then web on 80/443 |
-| `ports-only` | `simple.ports_only` | Full port scan, no follow-on modules |
+| `ports-only` | `simple.ports_only` | Full port scan, no follow-on plugins |
 | `ports-quick` | `simple.ports_quick` | Light port scan only |
 | `port` | `simple.port` | Single-port nmap |
 | `vuln` | `simple.vuln` | httpx + nuclei on 80/443 |
@@ -51,8 +51,8 @@ loot/workspace/<alias>/
 | Flag | Effect |
 |------|--------|
 | `-rr` / `--resume` | Skip steps recorded in `manifest.json` or with existing artifacts |
-| `-o` / `--osint` | Run OSINT modules during `normal` |
-| `-re` / `--recon` | Run subdomain recon during `normal` |
+| `-o` / `--osint` | Run OSINT plugins during `normal` |
+| `-re` / `--recon` | Run recon plugins during `normal` |
 | `-fp` / `--full-port` | Full port scan during `normal` |
 | `ENABLE_VULNERS` / `ENABLE_OS_DETECT` | nmap `vulners.nse` CVE findings and `-O` OS fingerprint (default on; off in stealth) |
 | `--testssl` | Force testssl on HTTPS |
@@ -75,7 +75,19 @@ Findings are written to `findings.jsonl` as JSON lines:
 
 HTTP security header analysis is in `bin/kitelon_engine/checks/headers.py` (HSTS, CSP, cookies, CORS, X-Frame-Options).
 
-## Tool wrappers
+## Plugin registry
+
+Integrated tools are **plugins** ([GLOSSARY.md](GLOSSARY.md)). Enablement is declared in [`conf/plugins/registry.json`](../conf/plugins/registry.json) and loaded by [`plugin_registry.py`](../bin/kitelon_engine/plugin_registry.py).
+
+| Pipeline | Hook module | Status |
+|----------|-------------|--------|
+| `recon` | [`pipeline_hooks/recon.py`](../bin/kitelon_engine/pipeline_hooks/recon.py) | Registry-driven |
+| `osint` | `pipelines/osint.py` | Inline (registry documented) |
+| `web` / `port` | `pipelines/steps.py` | Inline (registry documented) |
+
+Content **packs** (e.g. Metasploit scanners) load from [`conf/packs/`](../conf/packs/) via [`pack_loader.py`](../bin/kitelon_engine/pack_loader.py). See [MODULARITY.md](MODULARITY.md).
+
+## Plugin wrappers
 
 Subprocess wrappers live in `bin/kitelon_engine/tools/`:
 
@@ -92,3 +104,5 @@ Subprocess wrappers live in `bin/kitelon_engine/tools/`:
 | ZAP | `web-deep` mode | JSON → `findings.jsonl` |
 
 Presets: `conf/presets/{normal,stealth,web}.conf`. See [DEVELOPMENT.md](DEVELOPMENT.md) for local pytest.
+
+Full plugin inventory: [PLUGINS.md](PLUGINS.md).

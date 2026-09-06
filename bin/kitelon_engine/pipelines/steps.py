@@ -9,10 +9,7 @@ from kitelon_engine.artifacts import Manifest
 from kitelon_engine.checks.headers import check_headers
 from kitelon_engine.context import ScanContext
 from kitelon_engine.tools import (
-    dnsx,
-    dnsrecon,
     ffuf,
-    gau,
     gobuster,
     gowitness,
     httpx,
@@ -23,7 +20,6 @@ from kitelon_engine.tools import (
     nmap,
     nuclei,
     smb,
-    subfinder,
     testssl,
     tlsx,
     wafw00f,
@@ -183,40 +179,11 @@ def port_discovery(ctx: ScanContext, manifest: Manifest, host: str, *, full: boo
 
 
 def recon_pass(ctx: ScanContext, manifest: Manifest) -> list[str]:
-    hosts = [ctx.target]
+    from kitelon_engine.pipeline_hooks import recon as recon_hooks
+    from kitelon_engine.plugin_registry import get_registry
 
-    if _opt(ctx, "enable_subfinder"):
-        out = manifest.artifact_path("recon", "subdomains.txt")
-        step = f"subfinder-{ctx.target}"
-        if manifest.should_skip(step, out):
-            if out.is_file():
-                hosts = [line.strip() for line in out.read_text(errors="replace").splitlines() if line.strip()]
-            else:
-                hosts = [ctx.target]
-        else:
-            hosts = subfinder.enumerate_subdomains(ctx, ctx.target, out)
-            manifest.step_done(step, str(out.relative_to(ctx.loot_root)))
-
-        if _opt(ctx, "enable_dnsx") and hosts:
-            dnsx_out = manifest.artifact_path("recon", "dnsx.json")
-            dnsx_step = f"dnsx-{ctx.target}"
-            if not manifest.should_skip(dnsx_step, dnsx_out):
-                hosts = dnsx.resolve_hosts(ctx, hosts, dnsx_out)
-                manifest.step_done(dnsx_step, str(dnsx_out.relative_to(ctx.loot_root)))
-
-    if _opt(ctx, "enable_dnsrecon"):
-        dnsrecon_out = manifest.artifact_path("recon", "dnsrecon.json")
-        dnsrecon_step = f"dnsrecon-{ctx.target}"
-        if not manifest.should_skip(dnsrecon_step, dnsrecon_out):
-            dnsrecon.run_dnsrecon(ctx, ctx.target, dnsrecon_out)
-            manifest.step_done(dnsrecon_step, str(dnsrecon_out.relative_to(ctx.loot_root)))
-
-    if _opt(ctx, "enable_gau"):
-        gau_out = manifest.artifact_path("recon", "gau-urls.txt")
-        gau_step = f"gau-{ctx.target}"
-        if not manifest.should_skip(gau_step, gau_out):
-            gau.run_gau(ctx, ctx.target, gau_out)
-            manifest.step_done(gau_step, str(gau_out.relative_to(ctx.loot_root)))
+    registry = get_registry(str(ctx.install_dir))
+    hosts = recon_hooks.run_recon_pipeline(ctx, manifest, registry)
 
     domains_json = manifest.artifact_path("recon", "domains.json")
     domains_json.write_text(json.dumps({"domain": ctx.target, "hosts": hosts}, indent=2), encoding="utf-8")

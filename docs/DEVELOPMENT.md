@@ -26,3 +26,19 @@ Presets include `osint-conservative` (default limits) and `osint-deep` (raised O
 ## Engine toggles
 
 See `examples/kitelon.conf` for `ENABLE_FFUF`, `ENABLE_WEBTECH`, `ENABLE_GOWITNESS`, `ENABLE_NAABU`, `ENABLE_DNSX`, `ENABLE_KATANA`, `ENABLE_TLSX`, and SMB/SSH passes.
+
+## Plugins and modularity
+
+- Vocabulary: [GLOSSARY.md](GLOSSARY.md)
+- Architecture: [MODULARITY.md](MODULARITY.md)
+- Inventory: [PLUGINS.md](PLUGINS.md)
+
+**Add a plugin:** wrapper in `bin/kitelon_engine/tools/`, `ENABLE_*` in config, entry in `conf/plugins/registry.json`, pipeline hook (see `pipeline_hooks/recon.py` for pattern).
+
+**Ship a pack:** JSON under `conf/packs/<plugin>/`, load with `pack_loader.load_pack()`, reference in registry `packs` list.
+
+Run registry/pack tests:
+
+```bash
+PYTHONPATH=bin pytest tests/test_plugin_registry.py tests/test_pack_loader.py -q
+```

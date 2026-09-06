@@ -3,7 +3,9 @@
 Reference for every external tool Kitelon installs or invokes.  
 Install path defaults: `/usr/share/kitelon/plugins`, Go binaries in `~/go/bin` → `/usr/local/bin`.
 
-**Legend:** **Engine** = wired in `bin/kitelon_engine/tools/` and `pipelines/`; **Report** = post-scan import or PDF/HTML generation only.
+**Legend:** **Plugin** = integrated tool ([GLOSSARY.md](GLOSSARY.md), [PLUGINS.md](PLUGINS.md)); **Engine** = wrapper in `bin/kitelon_engine/tools/`; **Report** = post-scan import or PDF/HTML only.
+
+Registry manifest: [`conf/plugins/registry.json`](../conf/plugins/registry.json). Content packs: [`conf/packs/`](../conf/packs/).
 
 ---
 
@@ -45,15 +47,17 @@ Go **1.27.0** is installed from [go.dev](https://go.dev/doc/install) into `/usr/
 
 Configurable in `kitelon.conf`: `SHODAN_MAX_RESULTS`, `CENSYS_MAX_RESULTS`, `CENSYS_MODE`, `GAU_MAX_URLS`, `GAU_PROVIDERS`, `METAGOOFILE_LIMIT`, `DNSRECON_AXFR`, and related timeouts. Preset `osint-deep` raises caps; stock defaults stay conservative.
 
-### Metasploit auxiliary scanners
+### Metasploit auxiliary scanners (addon pack)
 
-After nmap, Kitelon imports the host into the MSF workspace DB and runs **auxiliary/scanner** modules matched to open ports (SMB, HTTP, MySQL, RDP, etc.). Findings land in `findings.jsonl` and artifacts under `tools/metasploit/<host>/`.
+After nmap, Kitelon imports the host into the MSF workspace DB and runs **auxiliary/scanner** MSF modules matched to open ports. Findings land in `findings.jsonl` and artifacts under `tools/metasploit/<host>/`.
+
+Default scanner set: [`conf/packs/metasploit/scanners.json`](../conf/packs/metasploit/scanners.json) (loaded by pack loader). Edit the pack to add/remove scanners without changing Python.
 
 | Config key | Default | Meaning |
 |------------|---------|---------|
-| `ENABLE_METASPLOIT` | `1` | Run MSF auxiliary scanners (skipped in `stealth` mode) |
-| `MSF_MODULE_TIMEOUT` | `420` | Seconds per module |
-| `MSF_MAX_MODULES` | `12` | Cap modules per host |
+| `ENABLE_METASPLOIT` | `1` | Run Metasploit plugin (skipped in `stealth` mode) |
+| `MSF_MODULE_TIMEOUT` | `420` | Seconds per MSF module |
+| `MSF_MAX_MODULES` | `12` | Cap MSF modules per host |
 
 ---
 
@@ -72,7 +76,9 @@ After nmap, Kitelon imports the host into the MSF workspace DB and runs **auxili
 
 ---
 
-## Git plugins (`$PLUGINS_DIR`)
+## Git clones (`$PLUGINS_DIR`)
+
+Vendored upstream repos for plugins (not content packs):
 
 | Directory | Repository | Notes |
 |-----------|------------|-------|
@@ -82,7 +88,7 @@ After nmap, Kitelon imports the host into the MSF workspace DB and runs **auxili
 | metagoofil | https://github.com/laramies/metagoofil | **Engine** `ENABLE_METAGOOFILE` (opt-in) |
 | ssh-audit | https://github.com/jtesta/ssh-audit | **Engine** `ENABLE_SSH_AUDIT` (port 22) |
 | enum4linux-ng | https://github.com/cddmp/enum4linux-ng | apt or git fallback: see above |
-| nuclei-templates | updated by `nuclei -update-templates` during install | `NUCLEI_TEMPLATES` path |
+| nuclei-templates | updated by `nuclei -update-templates` during install | Nuclei **pack** (`NUCLEI_TEMPLATES`); move under `conf/packs/` in a future release |
 
 ---
 
@@ -91,7 +97,7 @@ After nmap, Kitelon imports the host into the MSF workspace DB and runs **auxili
 | Asset | URL | Purpose |
 |-------|-----|---------|
 | vulners.nse | https://github.com/vulnersCom/nmap-vulners | Nmap CVE script (`ENABLE_VULNERS`) |
-| web-brute-common.txt | SecLists `Discovery/Web-Content/common.txt` | dirsearch / gobuster / ffuf wordlist |
+| web-brute-common.txt | SecLists `Discovery/Web-Content/common.txt` | dirsearch / gobuster / ffuf **wordlist pack** |
 
 ---
 

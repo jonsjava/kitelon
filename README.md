@@ -134,6 +134,8 @@ presets, common ports).
 Queued scans need `kitelon_worker` running; `--sync` runs in the foreground and
 imports loot when finished (no worker required). Full reference: [docs/CLI.md](docs/CLI.md).
 
+**Plugins:** Kitelon integrates external scanners as **plugins** with optional **addons** and content **packs**. See [docs/GLOSSARY.md](docs/GLOSSARY.md), [docs/PLUGINS.md](docs/PLUGINS.md), [docs/MODULARITY.md](docs/MODULARITY.md).
+
 ## Scan modes
 
 | Mode | Description |

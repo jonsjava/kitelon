@@ -124,7 +124,13 @@ def put_artifact(
 
 
 def get_artifact(conn: Any, workspace_id: int, rel_path: str | Path) -> dict[str, Any] | None:
+    """Retrieve artifact with size and format validation.
+
+    Raises:
+        ValueError: If artifact exceeds maximum allowed size or has invalid path.
+    """
     rel = normalize_rel_path(rel_path)
+
     row = conn.execute(
         """
         SELECT id, workspace_id, rel_path, content, content_type, size_bytes, sha256, updated_at
@@ -133,7 +139,19 @@ def get_artifact(conn: Any, workspace_id: int, rel_path: str | Path) -> dict[str
         """,
         (workspace_id, rel),
     ).fetchone()
-    return dict(row) if row else None
+
+    if not row:
+        return None
+
+    # Validate size on retrieval (allow 10% tolerance for metadata overhead)
+    stored_size = int(row["size_bytes"]) or 0
+    max_retrieval_size = MAX_ARTIFACT_BYTES * 1.1
+    if stored_size > max_retrieval_size:
+        raise ValueError(
+            f"artifact exceeds maximum retrieval size ({stored_size} bytes > {max_retrieval_size})"
+        )
+
+    return dict(row)
 
 
 def get_artifact_bytes(conn: Any, workspace_id: int, rel_path: str | Path) -> bytes | None:
@@ -144,6 +162,11 @@ def get_artifact_bytes(conn: Any, workspace_id: int, rel_path: str | Path) -> by
     if isinstance(content, memoryview):
         return content.tobytes()
     return bytes(content)
+
+
+def _canonicalize_path(path: Path) -> Path:
+    """Canonicalize a path for consistent comparison and operations."""
+    return path.expanduser().resolve()
 
 
 def list_artifacts(
@@ -232,8 +255,13 @@ def store_file_from_disk(
 ) -> dict[str, Any] | None:
     if not file_path.is_file():
         return None
+    
+    # Canonicalize paths for consistent comparison before computing relative path
+    canonical_loot_dir = _canonicalize_path(loot_dir)
+    canonical_file_path = _canonicalize_path(file_path)
+    
     try:
-        rel = normalize_rel_path(rel_path or file_path.relative_to(loot_dir))
+        rel = normalize_rel_path(rel_path or canonical_file_path.relative_to(canonical_loot_dir))
     except ValueError:
         return None
     size = file_path.stat().st_size

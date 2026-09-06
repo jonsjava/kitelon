@@ -117,7 +117,8 @@ def test_loot_enrich_services_parser(tmp_path: Path):
     assert captured[0][2] == "nginx"
 
 
-def test_metasploit_service_modules():
+def test_metasploit_service_modules(tmp_path: Path):
+    from kitelon_engine.context import ScanContext
     from kitelon_engine.tools.metasploit import modules_for_service
     from kitelon_engine.tools.nmap_parse import parse_nmap_services
 
@@ -126,10 +127,17 @@ def test_metasploit_service_modules():
     assert services[0].port == 443
     assert services[0].product == "nginx"
 
-    modules = modules_for_service(445, "microsoft-ds")
+    ctx = ScanContext(
+        install_dir=tmp_path,
+        target="example.com",
+        mode="normal",
+        workspace="demo",
+        options={},
+    )
+    modules = modules_for_service(ctx, 445, "microsoft-ds")
     assert "auxiliary/scanner/smb/smb_ms17_010" in modules
 
-    https_modules = modules_for_service(443, "https")
+    https_modules = modules_for_service(ctx, 443, "https")
     assert "auxiliary/scanner/http/http_version" in https_modules
 
 
