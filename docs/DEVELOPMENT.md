@@ -13,10 +13,10 @@ Tests cover ffuf/webtech JSON parsers, findings schema, manifest resume logic, a
 
 ## CI
 
-GitHub Actions workflow [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs on every push and pull request to `main`:
+GitHub Actions workflows on every push and pull request to `main`:
 
-- **test** — `pytest tests/`
-- **vet** — [SafeDep vet](https://github.com/safedep/vet/releases) dependency scan (PRs scan changed manifests; pushes scan the repo)
+- [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) — **test** (`pytest tests/`)
+- [`.github/workflows/vet.yml`](../.github/workflows/vet.yml) — **vet** ([SafeDep vet](https://github.com/safedep/vet/releases) dependency scan; PRs scan changed manifests)
 
 To require both before merging to `main`, enable branch protection on GitHub: **Settings → Branches → Branch protection rules → `main` → Require status checks** and select `test` and `vet`.
 

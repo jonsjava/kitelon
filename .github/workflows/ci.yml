@@ -8,8 +8,6 @@ on:
 
 permissions:
   contents: read
-  issues: write
-  pull-requests: write
 
 jobs:
   test:
@@ -28,18 +26,3 @@ jobs:
         run: pytest tests/ -q
         env:
           LOG_DIR: /tmp/kitelon-test-logs
-
-  vet:
-    name: vet
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Scan dependencies with vet
-        uses: safedep/vet-action@v1
-        with:
-          version: v1.19.0
-          add-step-summary: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
