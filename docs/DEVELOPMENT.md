@@ -11,6 +11,22 @@ PYTHONPATH=bin pytest tests/ -q
 
 Tests cover ffuf/webtech JSON parsers, findings schema, manifest resume logic, and nmap service import.
 
+## CI
+
+GitHub Actions workflow [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs on every push and pull request to `main`:
+
+- **test** — `pytest tests/`
+- **vet** — [SafeDep vet](https://github.com/safedep/vet/releases) dependency scan (PRs scan changed manifests; pushes scan the repo)
+
+To require both before merging to `main`, enable branch protection on GitHub: **Settings → Branches → Branch protection rules → `main` → Require status checks** and select `test` and `vet`.
+
+Local vet scan (optional):
+
+```bash
+curl -fsSL https://github.com/safedep/vet/releases/download/v1.19.0/vet_Linux_x86_64.tar.gz | tar xz
+./vet scan -D .
+```
+
 ## Scan presets
 
 Presets live under `conf/presets/`. Load at scan time:

@@ -1,6 +1,6 @@
 # Kitelon
 
-[![Test Results](https://img.shields.io/github/actions/workflow/status/jonsjava/kitelon/test.yml?branch=main&label=test%20results)](https://github.com/jonsjava/kitelon/actions/workflows/test.yml)
+[![CI](https://img.shields.io/github/actions/workflow/status/jonsjava/kitelon/ci.yml?branch=main&label=CI)](https://github.com/jonsjava/kitelon/actions/workflows/ci.yml)
 [![Version](https://img.shields.io/github/v/tag/jonsjava/kitelon?label=version)](https://github.com/jonsjava/kitelon/releases)
 
 Kitelon is a security automation platform for **authorized**
