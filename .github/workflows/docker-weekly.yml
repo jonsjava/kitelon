@@ -1,0 +1,74 @@
+name: docker-weekly
+
+on:
+  schedule:
+    # Sunday 06:00 UTC — rebuild with latest Ubuntu packages and push to Docker Hub.
+    - cron: "0 6 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  vet:
+    uses: ./.github/workflows/vet.yml
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+
+  clamav:
+    uses: ./.github/workflows/malware-scan.yml
+    permissions:
+      contents: read
+
+  publish:
+    needs: [test, vet, clamav]
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set weekly image tag
+        run: echo "IMAGE_TAG=weekly-$(date -u +%Y-%m-%d)" >> "$GITHUB_ENV"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          pull: true
+          push: false
+          load: true
+          tags: |
+            jonsjava/kitelon:latest
+            jonsjava/kitelon:${{ env.IMAGE_TAG }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: jonsjava/kitelon:${{ env.IMAGE_TAG }}
+          format: table
+          exit-code: 1
+          severity: CRITICAL,HIGH
+
+      - name: Push image
+        run: |
+          docker push jonsjava/kitelon:latest
+          docker push jonsjava/kitelon:${{ env.IMAGE_TAG }}

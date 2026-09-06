@@ -19,6 +19,7 @@ GitHub Actions workflows on every push and pull request to `main`:
 - [`.github/workflows/vet.yml`](../.github/workflows/vet.yml) — **vet** ([SafeDep vet](https://github.com/safedep/vet/releases) dependency scan; PRs scan changed manifests)
 - [`.github/workflows/malware-scan.yml`](../.github/workflows/malware-scan.yml) — **clamav** ([ClamAV](https://www.clamav.net/) file scan on the Ubuntu runner; definitions cached between runs)
 - [`.github/workflows/docker-publish.yml`](../.github/workflows/docker-publish.yml) — **publish** (push `jonsjava/kitelon` to Docker Hub on `v*` tags, after `test`/`vet`/`clamav` pass and Trivy scan succeeds)
+- [`.github/workflows/docker-weekly.yml`](../.github/workflows/docker-weekly.yml) — **publish** (Sundays 06:00 UTC: run checks, `apt full-upgrade` in the image, rebuild, Trivy scan, push `latest` and `weekly-YYYY-MM-DD`)
 
 To require all three before merging to `main`, enable branch protection on GitHub: **Settings → Branches → Branch protection rules → `main` → Require status checks** and select `test`, `vet`, and `clamav`.
 

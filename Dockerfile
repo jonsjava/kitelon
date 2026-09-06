@@ -4,6 +4,11 @@
 
 FROM ubuntu:24.04
 
+# Refresh base packages on each image build (weekly cron rebuild pulls latest base).
+RUN apt-get update \
+    && apt-get -y full-upgrade \
+    && rm -rf /var/lib/apt/lists/*
+
 LABEL org.opencontainers.image.title="Kitelon" \
       org.opencontainers.image.description="Offensive security automation platform" \
       org.opencontainers.image.source="https://github.com/kitelon"
