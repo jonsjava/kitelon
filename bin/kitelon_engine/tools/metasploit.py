@@ -1,6 +1,7 @@
 """Metasploit auxiliary modules via msfconsole."""
 
 import json
+import os
 import re
 import tempfile
 from pathlib import Path
@@ -126,11 +127,23 @@ def _write_resource_script(host: str, port: int, module: str) -> Path:
     return Path(rc_file.name)
 
 
+def _msf_run_as_user() -> str | None:
+    user = os.environ.get("KITELON_MSFDB_USER", "").strip()
+    if user and os.geteuid() == 0:
+        return user
+    return None
+
+
 def _run_msfconsole(ctx: ScanContext, script: Path, *, timeout: int) -> tuple[int, str]:
     msf = which("msfconsole")
     if not msf:
         return 127, "msfconsole not found"
-    proc = run_cmd([msf, "-q", "-r", str(script)], timeout=timeout)
+    run_as = _msf_run_as_user()
+    if run_as and which("runuser"):
+        args = ["runuser", "-u", run_as, "--", msf, "-q", "-r", str(script)]
+    else:
+        args = [msf, "-q", "-r", str(script)]
+    proc = run_cmd(args, timeout=timeout)
     return proc.returncode, proc.stdout + proc.stderr
 
 

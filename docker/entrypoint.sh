@@ -98,6 +98,15 @@ run_migrations() {
     python3 "$INSTALL_DIR/bin/kitelon_db.py" migrate
 }
 
+start_metasploit_db() {
+    command -v msfdb &>/dev/null || return 0
+    [[ -f "$INSTALL_DIR/bin/msfdb.sh" ]] || return 0
+    # shellcheck source=/dev/null
+    source "$INSTALL_DIR/bin/kitelon_ui.sh"
+    source "$INSTALL_DIR/bin/msfdb.sh"
+    kitelon_msfdb_setup || kitelon_log "Metasploit DB unavailable (db_import may be skipped)"
+}
+
 bootstrap() {
     mkdir -p "$INSTALL_DIR/loot/workspace" /var/log/kitelon
     write_db_secrets
@@ -107,6 +116,7 @@ bootstrap() {
         wait_for_postgres
         run_migrations
     fi
+    start_metasploit_db
 }
 
 run_web() {

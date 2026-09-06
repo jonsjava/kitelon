@@ -20,6 +20,7 @@ x-kitelon-env: &kitelon-env
   WEB_API_KEY: ${WEB_API_KEY:-}
   LOG_DIR: /var/log/kitelon
   LOG_STDERR: "1"
+  KITELON_MSFDB_USER: kitelon
 
 x-kitelon-volumes: &kitelon-volumes
   - kitelon_loot:/usr/share/kitelon/loot

@@ -2,6 +2,10 @@
 # Metasploit database helpers (sourced by install.sh and kitelon)
 
 kitelon_msfdb_user() {
+    if [[ -n "${KITELON_MSFDB_USER:-}" ]]; then
+        echo "$KITELON_MSFDB_USER"
+        return 0
+    fi
     if [[ -n "${SUDO_USER:-}" && "$SUDO_USER" != "root" ]]; then
         echo "$SUDO_USER"
         return 0
@@ -16,12 +20,30 @@ kitelon_msfdb_user() {
         echo "$u"
         return 0
     fi
+    if [[ $EUID -eq 0 ]] && id -u kitelon &>/dev/null; then
+        echo "kitelon"
+        return 0
+    fi
     return 1
+}
+
+kitelon_msfdb_home() {
+    local user="$1"
+    local home=""
+    home=$(getent passwd "$user" 2>/dev/null | cut -d: -f6)
+    if [[ -n "$home" ]]; then
+        echo "$home"
+    elif [[ "$user" == "root" ]]; then
+        echo "/root"
+    else
+        echo "/home/$user"
+    fi
 }
 
 kitelon_msfdb_port() {
     local user="$1"
-    local conf="/home/$user/.msf4/db/postgresql.conf"
+    local conf
+    conf="$(kitelon_msfdb_home "$user")/.msf4/db/postgresql.conf"
     if [[ -f "$conf" ]] && grep -qE '^port\s*=' "$conf"; then
         grep -E '^port\s*=' "$conf" | awk -F= '{print $2}' | tr -d ' '
     else
@@ -77,7 +99,7 @@ kitelon_msfdb_db_running() {
     local user="$1"
     local port db_dir
     port=$(kitelon_msfdb_port "$user")
-    db_dir="/home/$user/.msf4/db"
+    db_dir="$(kitelon_msfdb_home "$user")/.msf4/db"
 
     if kitelon_msfdb_pg_ctl "$user" -D "$db_dir" status &>/dev/null; then
         return 0
@@ -134,7 +156,8 @@ kitelon_msfdb_kill_port() {
 
 kitelon_msfdb_recover() {
     local user="$1"
-    local db_dir="/home/$user/.msf4/db"
+    local db_dir
+    db_dir="$(kitelon_msfdb_home "$user")/.msf4/db"
     local port
     port=$(kitelon_msfdb_port "$user")
 
@@ -199,9 +222,11 @@ kitelon_msfdb_setup() {
 
     kitelon_msfdb_recover "$user"
 
-    local db_dir="/home/$user/.msf4/db"
+    local db_dir db_yml
+    db_dir="$(kitelon_msfdb_home "$user")/.msf4/db"
+    db_yml="$(kitelon_msfdb_home "$user")/.msf4/database.yml"
     local has_db=0
-    [[ -d "$db_dir/base" || -f "/home/$user/.msf4/database.yml" ]] && has_db=1
+    [[ -d "$db_dir/base" || -f "$db_yml" ]] && has_db=1
 
     if [[ "$has_db" -eq 1 ]]; then
         kl_msg_info "Starting existing Metasploit DB as ${user}..."
@@ -217,7 +242,7 @@ kitelon_msfdb_setup() {
     fi
 
     kl_msg_warn "Metasploit DB is not running (user: ${user})"
-    kl_msg_warn "  Log: /home/${user}/.msf4/db/log"
+    kl_msg_warn "  Log: $(kitelon_msfdb_home "$user")/.msf4/db/log"
     kl_msg_warn "  Fix: run as ${user}: msfdb stop && msfdb start"
     kl_msg_warn "  Or: msfdb reinit  (rebuilds DB; local MSF data is lost)"
     return 1

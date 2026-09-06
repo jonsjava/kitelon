@@ -10,6 +10,7 @@ LABEL org.opencontainers.image.title="Kitelon" \
 
 ENV DEBIAN_FRONTEND=noninteractive \
     KITELON_INSTALL_DIR=/usr/share/kitelon \
+    KITELON_MSFDB_USER=kitelon \
     GOPATH=/root/go
 
 # install.sh expects a kitelon.conf in the build tree (non-interactive install).
@@ -17,7 +18,8 @@ COPY docker/kitelon.conf /build/kitelon.conf
 COPY . /build/
 
 WORKDIR /build
-RUN bash install.sh force -y
+RUN useradd --create-home --shell /bin/bash kitelon \
+    && bash install.sh force -y
 
 COPY docker/entrypoint.sh /usr/local/bin/kitelon-entrypoint.sh
 RUN chmod 755 /usr/local/bin/kitelon-entrypoint.sh \
