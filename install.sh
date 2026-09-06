@@ -799,6 +799,17 @@ install_metasploit() {
             ;;
     esac
 
+    # msfdb refuses root; Docker/non-interactive installs need a dedicated user.
+    local msf_user="${KITELON_MSFDB_USER:-}"
+    if [[ -z "$msf_user" && $EUID -eq 0 && ( -f /.dockerenv || -n "${KITELON_DOCKER:-}" ) ]]; then
+        msf_user=kitelon
+        export KITELON_MSFDB_USER=kitelon
+    fi
+    if [[ -n "$msf_user" && $EUID -eq 0 ]] && ! id -u "$msf_user" &>/dev/null; then
+        kl_msg_info "Creating Metasploit DB user ${msf_user}..."
+        useradd --create-home --shell /bin/bash "$msf_user"
+    fi
+
     if [[ -f "$SCRIPT_DIR/bin/msfdb.sh" ]]; then
         # shellcheck source=/dev/null
         source "$SCRIPT_DIR/bin/msfdb.sh"

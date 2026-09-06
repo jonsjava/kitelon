@@ -11,6 +11,7 @@ LABEL org.opencontainers.image.title="Kitelon" \
 ENV DEBIAN_FRONTEND=noninteractive \
     KITELON_INSTALL_DIR=/usr/share/kitelon \
     KITELON_MSFDB_USER=kitelon \
+    KITELON_DOCKER=1 \
     GOPATH=/root/go
 
 # install.sh expects a kitelon.conf in the build tree (non-interactive install).
