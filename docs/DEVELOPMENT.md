@@ -18,8 +18,22 @@ GitHub Actions workflows on every push and pull request to `main`:
 - [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) — **test** (`pytest tests/`)
 - [`.github/workflows/vet.yml`](../.github/workflows/vet.yml) — **vet** ([SafeDep vet](https://github.com/safedep/vet/releases) dependency scan; PRs scan changed manifests)
 - [`.github/workflows/malware-scan.yml`](../.github/workflows/malware-scan.yml) — **clamav** ([ClamAV](https://www.clamav.net/) file scan on the Ubuntu runner; definitions cached between runs)
+- [`.github/workflows/docker-publish.yml`](../.github/workflows/docker-publish.yml) — **publish** (push `jonsjava/kitelon` to Docker Hub on `v*` tags, after `test`/`vet`/`clamav` pass and Trivy scan succeeds)
 
 To require all three before merging to `main`, enable branch protection on GitHub: **Settings → Branches → Branch protection rules → `main` → Require status checks** and select `test`, `vet`, and `clamav`.
+
+### Docker Hub release
+
+1. Create the repository `jonsjava/kitelon` on [Docker Hub](https://hub.docker.com).
+2. Add GitHub Actions secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`.
+3. Tag a release commit:
+
+```bash
+git tag v0.3.7
+git push origin v0.3.7
+```
+
+That runs CI checks, builds the production `Dockerfile`, scans the image with Trivy, and pushes `jonsjava/kitelon:latest` and `jonsjava/kitelon:v0.3.7`.
 
 Local ClamAV scan (optional):
 

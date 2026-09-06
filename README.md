@@ -4,6 +4,7 @@
 [![vet](https://img.shields.io/github/actions/workflow/status/jonsjava/kitelon/vet.yml?branch=main&label=vet)](https://github.com/jonsjava/kitelon/actions/workflows/vet.yml)
 [![malware scan](https://img.shields.io/github/actions/workflow/status/jonsjava/kitelon/malware-scan.yml?branch=main&label=malware)](https://github.com/jonsjava/kitelon/actions/workflows/malware-scan.yml)
 [![Version](https://img.shields.io/github/v/tag/jonsjava/kitelon?label=version)](https://github.com/jonsjava/kitelon/releases)
+[![Docker Pulls](https://img.shields.io/docker/pulls/jonsjava/kitelon)](https://hub.docker.com/r/jonsjava/kitelon)
 
 Kitelon is a security automation platform for **authorized**
 reconnaissance, vulnerability scanning, and reporting in lab and engagement
@@ -60,6 +61,13 @@ CLI command: `kitelon` (one-off scans and scripting)
 Interactive console: `kitelon-cli` (workspaces, jobs, schedules, DB — see [Interactive CLI](#interactive-cli-kitelon-cli) below)
 
 ### Docker
+
+Published images: [`jonsjava/kitelon`](https://hub.docker.com/r/jonsjava/kitelon) on Docker Hub (built on version tags).
+
+```bash
+docker pull jonsjava/kitelon:latest
+docker run -it --rm --cap-add=NET_RAW --cap-add=NET_ADMIN jonsjava/kitelon:latest help
+```
 
 Full stack (PostgreSQL + Web UI + job worker):
 
