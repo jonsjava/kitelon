@@ -265,6 +265,35 @@ git_clone_optional() {
     return 1
 }
 
+# Fast-forward pull; on failure fetch and hard-reset to upstream.
+kitelon_git_update() {
+    local dest="$1"
+    git -C "$dest" pull --ff-only 2>/dev/null && return 0
+    local upstream=""
+    upstream=$(git -C "$dest" rev-parse --abbrev-ref '@{u}' 2>/dev/null || true)
+    if [[ -n "$upstream" ]]; then
+        git -C "$dest" fetch origin 2>/dev/null \
+            && git -C "$dest" reset --hard "$upstream" 2>/dev/null && return 0
+    fi
+    local head_branch=""
+    head_branch=$(git -C "$dest" symbolic-ref -q --short HEAD 2>/dev/null || true)
+    if [[ -n "$head_branch" ]]; then
+        git -C "$dest" fetch origin 2>/dev/null \
+            && git -C "$dest" reset --hard "origin/${head_branch}" 2>/dev/null && return 0
+    fi
+    return 1
+}
+
+# Write a /usr/local/bin wrapper; remove dangling symlinks first.
+kitelon_install_bin_wrapper() {
+    local dest="$1"
+    local body="$2"
+    mkdir -p "$(dirname "$dest")"
+    rm -f "$dest"
+    printf '%s\n' "$body" > "$dest"
+    chmod 755 "$dest"
+}
+
 # Pull latest for an existing plugin clone, or clone if missing.
 kitelon_git_sync() {
     local label="$1"
@@ -274,7 +303,7 @@ kitelon_git_sync() {
 
     if [[ -d "$dest/.git" ]]; then
         kl_msg_info "Updating $label..."
-        git -C "$dest" pull --ff-only 2>/dev/null \
+        kitelon_git_update "$dest" \
             || warn_optional "$label git update failed (existing clone left in place)"
         return 0
     fi
@@ -446,10 +475,6 @@ install_base_dependencies() {
                 libssl-dev
                 libpcap-dev
             )
-            
-            pkg_install_optional theharvester
-            pkg_install_optional dnsrecon
-            pip_install_pkg theHarvester || warn_optional "pip install theHarvester failed"
             ;;
             
         rhel)
@@ -498,20 +523,23 @@ install_base_dependencies() {
         kl_msg_err "Base dependency install failed"
         exit 1
     }
+
+    if [[ "$OS" == "debian" ]]; then
+        pkg_install_optional dnsrecon
+        if [[ "$IS_KALI" == "1" ]]; then
+            pkg_install_optional theharvester
+        fi
+        if ! command -v theHarvester &>/dev/null; then
+            pip_install_pkg theHarvester || warn_optional "pip install theHarvester failed"
+        else
+            kl_msg_ok "theHarvester: $(command -v theHarvester)"
+        fi
+    fi
 }
 
 # Setup Python environment
 setup_python() {
     kl_msg_info "Setting up Python environment..."
-    
-    # Upgrade pip
-    kl_msg_info "Upgrading pip..."
-    if kitelon_pip_install install --upgrade pip --break-system-packages \
-        || kitelon_pip_install install --upgrade pip; then
-        kl_msg_ok "pip upgraded"
-    else
-        warn_optional "pip upgrade failed"
-    fi
     
     # Install Python packages
     local py_packages=(
@@ -602,22 +630,39 @@ kitelon_go_tarball_arch() {
 
 kitelon_go_tarball_sha256() {
     local tarball="$1"
-    python3 - <<'PY' "$tarball"
+    case "$tarball" in
+        go1.27.0.linux-amd64.tar.gz)
+            echo "675c26c449cbb18fc24b74650de1eabbae6e16f64326fd85a283fb3b58280685"
+            ;;
+        go1.27.0.linux-arm64.tar.gz)
+            echo "51798d2c42d0e1c6ed7fd9f48728b4193abac9e8aad6dbac2fe96a81f5909bda"
+            ;;
+        go1.27.0.darwin-amd64.tar.gz)
+            echo "d3314e25496e4381d71a5c51d2907e7af655d199f6780b549f015bd85fef4986"
+            ;;
+        go1.27.0.darwin-arm64.tar.gz)
+            echo "90493b3bbd5e10f91d12153198bf1994fd756399b4fec93b49b0c6e2acdeeb3e"
+            ;;
+        *)
+            python3 - <<'PY' "$tarball"
 import json
 import sys
 import urllib.request
 
 tar = sys.argv[1]
 try:
-    with urllib.request.urlopen("https://go.dev/dl/?mode=json", timeout=60) as resp:
+    with urllib.request.urlopen("https://go.dev/dl/?mode=json&include=all", timeout=60) as resp:
         rows = json.load(resp)
 except OSError:
     sys.exit(0)
-for row in rows:
-    if row.get("file") == tar:
-        print(row.get("sha256", ""))
-        break
+for rel in rows:
+    for row in rel.get("files", []):
+        if row.get("filename") == tar:
+            print(row.get("sha256", ""))
+            sys.exit(0)
 PY
+            ;;
+    esac
 }
 
 kitelon_installed_go_version() {
@@ -635,6 +680,7 @@ kitelon_link_go_binary() {
     local name="$1"
     local src="$2"
     [[ -x "$src" ]] || return 0
+    rm -f "/usr/local/bin/$name" "/usr/bin/$name"
     ln -sf "$src" "/usr/local/bin/$name" 2>/dev/null \
         || ln -sf "$src" "/usr/bin/$name" 2>/dev/null \
         || warn_optional "symlink $name failed"
@@ -729,7 +775,7 @@ install_wafw00f() {
     local wafw00f_repo="$PLUGINS_DIR/wafw00f"
     if [[ -d "$wafw00f_repo/.git" ]]; then
         kl_msg_info "Updating wafw00f..."
-        git -C "$wafw00f_repo" pull --ff-only 2>/dev/null \
+        kitelon_git_update "$wafw00f_repo" \
             || warn_optional "wafw00f git update failed (existing clone left in place)"
     elif [[ ! -d "$wafw00f_repo" ]]; then
         kl_msg_info "Installing wafw00f..."
@@ -870,9 +916,9 @@ install_go_tools() {
     
     export GOTOOLCHAIN=auto
     export GOPATH="${KITELON_GOPATH:-/usr/local/share/kitelon-go}"
-    export GOBIN="${KITELON_GOBIN:-/usr/local/bin}"
+    export GOBIN="${KITELON_GOBIN:-$GOPATH/bin}"
     mkdir -p "$GOPATH" "$GOBIN"
-    cd "$GOPATH/bin" 2>/dev/null || mkdir -p "$GOPATH/bin" && cd "$GOPATH/bin" || return
+    cd "$GOBIN" 2>/dev/null || mkdir -p "$GOBIN" && cd "$GOBIN" || return
 
     local versions_file="$SCRIPT_DIR/conf/go-tool-versions.conf"
     [[ -f "$versions_file" ]] || versions_file="$INSTALL_DIR/conf/go-tool-versions.conf"
@@ -887,21 +933,17 @@ install_go_tools() {
         kl_msg_info "Installing $tool_name ($tool_path)..."
         local out rc=0
         out=$(kitelon_tmpfile)
+        # go install refuses to overwrite symlinks/wrappers already in GOBIN.
+        rm -f "$GOBIN/$tool_name"
         env GO111MODULE=on go install "$tool_path" >"$out" 2>&1 || rc=$?
         if [[ $rc -eq 0 ]]; then
+            kitelon_link_go_binary "$tool_name" "$GOBIN/$tool_name"
             kl_msg_ok "$tool_name"
         else
             warn_optional "go install $tool_name failed"
             kitelon_show_cmd_errors "$out"
         fi
         rm -f "$out"
-
-        if [[ -f "$GOBIN/$tool_name" ]]; then
-            chmod 755 "$GOBIN/$tool_name" 2>/dev/null || true
-        elif [[ -f "$GOPATH/bin/$tool_name" ]]; then
-            ln -fs "$GOPATH/bin/$tool_name" "$GOBIN/$tool_name" 2>/dev/null \
-                || warn_optional "symlink $tool_name failed"
-        fi
     done < "$versions_file"
     
     # Update nuclei templates
@@ -939,7 +981,7 @@ install_python_tools() {
     local testssl_repo="$PLUGINS_DIR/testssl.sh"
     if [[ -d "$testssl_repo/.git" ]]; then
         kl_msg_info "Updating testssl.sh..."
-        git -C "$testssl_repo" pull --ff-only 2>/dev/null \
+        kitelon_git_update "$testssl_repo" \
             || warn_optional "testssl.sh git update failed (existing clone left in place)"
     elif [[ ! -d "$testssl_repo" ]]; then
         kl_msg_info "Installing testssl.sh..."
@@ -960,11 +1002,8 @@ install_python_tools() {
             || chmod +x "$testssl_repo/testssl.sh" \
             || warn_optional "testssl.sh chmod failed"
         find "$testssl_repo/bin" -maxdepth 1 -type f -name '*.sh' -exec chmod 755 {} + 2>/dev/null || true
-        cat > /usr/local/bin/testssl.sh <<EOF
-#!/bin/bash
-exec bash "$testssl_repo/testssl.sh" "\$@"
-EOF
-        chmod 755 /usr/local/bin/testssl.sh
+        kitelon_install_bin_wrapper /usr/local/bin/testssl.sh "#!/bin/bash
+exec bash \"$testssl_repo/testssl.sh\" \"\$@\""
         kl_msg_ok "testssl.sh"
     fi
 
@@ -983,8 +1022,7 @@ EOF
     local dirsearch_repo="$PLUGINS_DIR/dirsearch"
     kitelon_git_sync "dirsearch" https://github.com/maurosoria/dirsearch.git "$dirsearch_repo" "v0.4.3"
     if [[ -d "$dirsearch_repo" ]]; then
-        kitelon_pip_install install -r "$dirsearch_repo/requirements.txt" --break-system-packages \
-            || kitelon_pip_install install -r "$dirsearch_repo/requirements.txt" \
+        kitelon_pip_install install -r "$dirsearch_repo/requirements.txt" --break-system-packages --ignore-installed \
             || warn_optional "dirsearch requirements install failed"
         chmod 755 "$dirsearch_repo/dirsearch.py" 2>/dev/null || chmod +x "$dirsearch_repo/dirsearch.py" || true
         ln -sf "$dirsearch_repo/dirsearch.py" /usr/local/bin/dirsearch 2>/dev/null || true
@@ -997,7 +1035,9 @@ EOF
 
 install_smb_engine_tools() {
     pkg_install_optional smbclient samba-common-bin ldap-utils
-    pkg_install_optional enum4linux-ng
+    if [[ "$IS_KALI" == "1" ]] || apt-cache show enum4linux-ng &>/dev/null; then
+        pkg_install_optional enum4linux-ng
+    fi
 
     if ! command -v enum4linux-ng &>/dev/null; then
         local repo="$PLUGINS_DIR/enum4linux-ng"
@@ -1006,15 +1046,12 @@ install_smb_engine_tools() {
             git_clone_optional "enum4linux-ng" https://github.com/cddmp/enum4linux-ng "$repo"
         fi
         if [[ -f "$repo/requirements.txt" ]]; then
-            kitelon_pip_install install -r "$repo/requirements.txt" --break-system-packages \
+            kitelon_pip_install install -r "$repo/requirements.txt" --break-system-packages --ignore-installed \
                 || warn_optional "enum4linux-ng requirements install failed"
         fi
         if [[ -f "$repo/enum4linux-ng.py" ]]; then
-            cat > /usr/local/bin/enum4linux-ng <<EOF
-#!/bin/bash
-exec python3 "$repo/enum4linux-ng.py" "\$@"
-EOF
-            chmod 755 /usr/local/bin/enum4linux-ng
+            kitelon_install_bin_wrapper /usr/local/bin/enum4linux-ng "#!/bin/bash
+exec python3 \"$repo/enum4linux-ng.py\" \"\$@\""
             kl_msg_ok "enum4linux-ng wrapper installed at /usr/local/bin/enum4linux-ng"
         fi
     else
@@ -1253,7 +1290,11 @@ install_phase3_services() {
         || warn_optional "kitelon-worker-cron.service copy failed"
     cp -f "$INSTALL_DIR/conf/kitelon-worker-cron.timer" /etc/systemd/system/ \
         || warn_optional "kitelon-worker-cron.timer copy failed"
-    systemctl daemon-reload 2>/dev/null || warn_optional "systemctl daemon-reload failed"
+    if [[ -f /.dockerenv || -n "${KITELON_DOCKER:-}" ]]; then
+        kl_msg_info "Skipping systemctl daemon-reload in Docker"
+    else
+        systemctl daemon-reload 2>/dev/null || warn_optional "systemctl daemon-reload failed"
+    fi
 
     mkdir -p /var/log/kitelon
     chmod 755 /var/log/kitelon 2>/dev/null || true
@@ -1530,7 +1571,6 @@ main() {
     create_directories
     
     install_kitelon_files
-    fix_loot_workspace_layout
     install_cli_symlink
 
     # Update package repos
@@ -1539,8 +1579,9 @@ main() {
     # Install build tools
     install_build_tools
     
-    # Install base dependencies
+    # Install base dependencies (python3/pip must exist before loot layout + theHarvester)
     install_base_dependencies
+    fix_loot_workspace_layout
     
     # Setup language environments
     setup_python

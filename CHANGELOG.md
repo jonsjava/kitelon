@@ -4,6 +4,20 @@ All notable changes to Kitelon are documented here.
 
 ## [Unreleased]
 
+## [0.3.9] - 2026-09-06
+
+### Install / Docker
+- Reorder `install.sh`: loot workspace layout and theHarvester pip run after `python3`/`pip` are installed.
+- Kali-only apt for `theharvester`; Ubuntu uses pip. Skip `enum4linux-ng` apt unless the package exists (Kali or `apt-cache show`).
+- PEP 668: drop pip self-upgrade on Debian/Ubuntu; use `--ignore-installed` for dirsearch and enum4linux-ng requirements.
+- Skip `systemctl daemon-reload` when `KITELON_DOCKER=1` or running inside Docker.
+- Pin Go 1.27.0 tarball SHA256 for linux/darwin amd64 and arm64 (fallback to go.dev JSON for other arches).
+- Upgrade-safe plugin/git installs: fetch+reset fallback, wrapper helpers that replace dangling symlinks (testssl.sh, enum4linux-ng).
+- Go tools install to `$GOPATH/bin` and symlink into PATH (fixes re-install when `/usr/local/bin` already has symlinks).
+
+### CI
+- Document `main` branch protection: PRs required; `test`, `vet`, and `clamav` must pass before merge.
+
 ## [0.3.8] - 2026-09-06
 
 ### Docker / CI

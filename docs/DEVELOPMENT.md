@@ -21,7 +21,22 @@ GitHub Actions workflows on every push and pull request to `main`:
 - [`.github/workflows/docker-publish.yml`](../.github/workflows/docker-publish.yml) — **publish** (on `v*` tags: reusable `test`/`vet`/`clamav` jobs, then Docker build, Trivy, push to Docker Hub)
 - [`.github/workflows/docker-weekly.yml`](../.github/workflows/docker-weekly.yml) — **publish** (Sundays 06:00 UTC: run checks, `apt full-upgrade` in the image, rebuild, Trivy scan, push `latest` and `weekly-YYYY-MM-DD`)
 
-To require all three before merging to `main`, enable branch protection on GitHub: **Settings → Branches → Branch protection rules → `main` → Require status checks** and select `test`, `vet`, and `clamav`.
+`main` is protected: pull requests are required, and **`test`**, **`vet`**, and **`clamav`** must pass before merge. Docker build/publish runs only on `v*` tags, not on PRs.
+
+To change protection (repo admin): **Settings → Branches → `main`**, or:
+
+```bash
+gh api --method PUT repos/jonsjava/kitelon/branches/main/protection --input - <<'EOF'
+{
+  "required_status_checks": {"strict": true, "contexts": ["test", "vet", "clamav"]},
+  "required_pull_request_reviews": {"required_approving_review_count": 0},
+  "enforce_admins": false,
+  "restrictions": null,
+  "allow_force_pushes": false,
+  "allow_deletions": false
+}
+EOF
+```
 
 ### Docker Hub release
 
