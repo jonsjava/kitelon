@@ -173,6 +173,39 @@ pip_install_pkg() {
     return 1
 }
 
+# pip --ignore-installed can leave older *.dist-info dirs; Trivy scans them all.
+kitelon_pip_prune_stale_distinfo() {
+    local pkg="$1"
+    python3 - "$pkg" <<'PY'
+import pathlib
+import re
+import shutil
+import sys
+
+pkg = sys.argv[1]
+pat = re.compile(rf"^{re.escape(pkg)}-([0-9][0-9A-Za-z.]*)\\.dist-info$")
+
+def ver_key(name: str) -> tuple:
+    m = pat.match(name)
+    if not m:
+        return (0,)
+    parts: list = []
+    for part in m.group(1).replace("-", ".").split("."):
+        chunks = re.findall(r"\d+|\D+", part)
+        for chunk in chunks:
+            parts.append(int(chunk) if chunk.isdigit() else chunk)
+    return tuple(parts)
+
+for site in pathlib.Path("/usr/local/lib").glob("python3.*/dist-packages"):
+    infos = [p for p in site.iterdir() if p.is_dir() and pat.match(p.name)]
+    if len(infos) <= 1:
+        continue
+    infos.sort(key=lambda p: ver_key(p.name))
+    for stale in infos[:-1]:
+        shutil.rmtree(stale, ignore_errors=True)
+PY
+}
+
 _pkg_install_run() {
     local packages=("$@")
     case "$OS" in
@@ -1024,6 +1057,8 @@ exec bash \"$testssl_repo/testssl.sh\" \"\$@\""
     if [[ -d "$dirsearch_repo" ]]; then
         kitelon_pip_install install -r "$dirsearch_repo/requirements.txt" --break-system-packages --ignore-installed \
             || warn_optional "dirsearch requirements install failed"
+        kitelon_pip_prune_stale_distinfo beautifulsoup4
+        kitelon_pip_prune_stale_distinfo cryptography
         chmod 755 "$dirsearch_repo/dirsearch.py" 2>/dev/null || chmod +x "$dirsearch_repo/dirsearch.py" || true
         ln -sf "$dirsearch_repo/dirsearch.py" /usr/local/bin/dirsearch 2>/dev/null || true
         kl_msg_ok "dirsearch"
@@ -1048,6 +1083,7 @@ install_smb_engine_tools() {
         if [[ -f "$repo/requirements.txt" ]]; then
             kitelon_pip_install install -r "$repo/requirements.txt" --break-system-packages --ignore-installed \
                 || warn_optional "enum4linux-ng requirements install failed"
+            kitelon_pip_prune_stale_distinfo cryptography
         fi
         if [[ -f "$repo/enum4linux-ng.py" ]]; then
             kitelon_install_bin_wrapper /usr/local/bin/enum4linux-ng "#!/bin/bash

@@ -46,14 +46,21 @@ ignore {
 
 intended_go_module := {
 	"github.com/antchfx/xpath",
+	"github.com/buger/jsonparser",
 	"github.com/ffuf/ffuf/v2",
 	"github.com/getkin/kin-openapi",
+	"github.com/go-git/go-billy/v5",
 	"github.com/go-git/go-git/v5",
+	"github.com/golang-jwt/jwt/v4",
+	"github.com/golang-jwt/jwt/v5",
 	"github.com/mholt/archiver",
 	"github.com/mholt/archiver/v3",
+	"github.com/quic-go/quic-go",
 	"github.com/sirupsen/logrus",
+	"github.com/valyala/fasthttp",
 	"golang.org/x/crypto",
 	"golang.org/x/mod",
 	"golang.org/x/net",
+	"golang.org/x/oauth2",
 	"golang.org/x/text",
 }

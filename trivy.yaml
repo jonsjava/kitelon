@@ -6,6 +6,8 @@ ignore-policy: security/trivy-intended.rego
 
 # Shipped scanner binaries from conf/go-tool-versions.conf. New CVEs in
 # their vendored modules are accepted until we bump those pins.
+# Binaries live under $GOPATH/bin (/usr/local/share/kitelon-go/bin) with
+# symlinks in /usr/local/bin — skip both paths.
 scan:
   skip-files:
     - "/usr/local/bin/dnsx"
@@ -30,6 +32,28 @@ scan:
     - "usr/local/bin/nuclei"
     - "usr/local/bin/subfinder"
     - "usr/local/bin/tlsx"
+    - "/usr/local/share/kitelon-go/bin/dnsx"
+    - "/usr/local/share/kitelon-go/bin/ffuf"
+    - "/usr/local/share/kitelon-go/bin/gau"
+    - "/usr/local/share/kitelon-go/bin/gobuster"
+    - "/usr/local/share/kitelon-go/bin/gowitness"
+    - "/usr/local/share/kitelon-go/bin/httpx"
+    - "/usr/local/share/kitelon-go/bin/katana"
+    - "/usr/local/share/kitelon-go/bin/naabu"
+    - "/usr/local/share/kitelon-go/bin/nuclei"
+    - "/usr/local/share/kitelon-go/bin/subfinder"
+    - "/usr/local/share/kitelon-go/bin/tlsx"
+    - "usr/local/share/kitelon-go/bin/dnsx"
+    - "usr/local/share/kitelon-go/bin/ffuf"
+    - "usr/local/share/kitelon-go/bin/gau"
+    - "usr/local/share/kitelon-go/bin/gobuster"
+    - "usr/local/share/kitelon-go/bin/gowitness"
+    - "usr/local/share/kitelon-go/bin/httpx"
+    - "usr/local/share/kitelon-go/bin/katana"
+    - "usr/local/share/kitelon-go/bin/naabu"
+    - "usr/local/share/kitelon-go/bin/nuclei"
+    - "usr/local/share/kitelon-go/bin/subfinder"
+    - "usr/local/share/kitelon-go/bin/tlsx"
     # dirsearch is the Python tree; native/Cargo.lock is unused Rust scaffolding.
     - "/usr/share/kitelon/plugins/dirsearch/native/Cargo.lock"
     - "usr/share/kitelon/plugins/dirsearch/native/Cargo.lock"
