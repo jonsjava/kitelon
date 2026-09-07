@@ -70,7 +70,7 @@ LOOT_ROOT = Path(os.environ.get("KITELON_LOOT_ROOT", INSTALL_DIR / "loot"))
 KITELON_BIN = Path(os.environ.get("KITELON_BIN", INSTALL_DIR / "kitelon"))
 WEB_BIND = os.environ.get("WEB_BIND", "127.0.0.1")
 WEB_PORT = int(os.environ.get("WEB_PORT", "8080"))
-API_KEY = os.environ.get("WEB_API_KEY", os.environ.get("KITELON_API_KEY", ""))
+API_KEY = os.environ.get("WEB_API_KEY") or os.environ.get("KITELON_API_KEY") or ""
 API_KEYS_FILE = Path("/root/.kitelon_api_keys.conf")
 
 

@@ -49,20 +49,21 @@ if [[ -f /root/.kitelon.conf ]]; then
   if [[ "$KITELON_QUIET" != "1" ]]; then
     kl_msg_status "Loaded configuration file from /root/.kitelon.conf"
   fi
-
-  if [[ -f /root/.kitelon_api_keys.conf ]]; then
-    dos2unix /root/.kitelon_api_keys.conf 2> /dev/null > /dev/null
-    source /root/.kitelon_api_keys.conf
-    if [[ "$KITELON_QUIET" != "1" ]]; then
-      kl_msg_status "Loaded API keys from /root/.kitelon_api_keys.conf"
-    fi
-  fi
 else
   cp "$_KL_SCRIPT_DIR/kitelon.conf" /root/.kitelon.conf 2> /dev/null
   dos2unix /root/.kitelon.conf 2> /dev/null > /dev/null
   source /root/.kitelon.conf
   if [[ "$KITELON_QUIET" != "1" ]]; then
     kl_msg_status "Loaded configuration file from /root/.kitelon.conf"
+  fi
+fi
+
+if [[ -f /root/.kitelon_api_keys.conf ]]; then
+  dos2unix /root/.kitelon_api_keys.conf 2> /dev/null > /dev/null
+  # shellcheck source=/dev/null
+  source /root/.kitelon_api_keys.conf
+  if [[ "$KITELON_QUIET" != "1" ]]; then
+    kl_msg_status "Loaded API keys from /root/.kitelon_api_keys.conf"
   fi
 fi
 
@@ -734,9 +735,14 @@ if [[ "$WEB_MODE" == "1" ]]; then
   export KITELON_LOOT_ROOT="$INSTALL_DIR/loot"
   export WEB_BIND="${WEB_BIND:-127.0.0.1}"
   export WEB_PORT="${WEB_PORT:-8080}"
-  export WEB_API_KEY="${WEB_API_KEY:-}"
+  if [[ -n "${WEB_API_KEY:-}" ]]; then
+    export WEB_API_KEY
+  else
+    unset WEB_API_KEY
+  fi
   export PYTHONPATH="$INSTALL_DIR/bin${PYTHONPATH:+:$PYTHONPATH}"
   echo -e "$KL_C_INFO[*]$KL_RESET Starting Kitelon Web UI at http://${WEB_BIND}:${WEB_PORT}"
+  echo -e "$KL_C_INFO[*]$KL_RESET Web API key: /root/.kitelon_api_keys.conf (paste the value after WEB_API_KEY= in the browser prompt)"
   exec python3 "$INSTALL_DIR/bin/kitelon_api.py"
 fi
 
