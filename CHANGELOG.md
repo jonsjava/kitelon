@@ -4,11 +4,23 @@ All notable changes to Kitelon are documented here.
 
 ## [Unreleased]
 
+## [0.3.8] - 2026-09-06
+
 ### Docker / CI
-- Trivy publish scan ignores intended findings: Metasploit and Go-module test secrets (path-scoped `.trivyignore.yaml`), kernel header / pdfkit / dirsearch / scanner-module CVEs (`security/trivy-intended.rego`), and shipped Go tool binaries (`trivy.yaml`).
-- ClamAV workflow chowns `/var/lib/clamav` to `clamav` after cache restore so `freshclam` can write temp files.
-- GitHub Actions bumped to Node 24 runtimes (`checkout@v5`, `cache@v5`, `setup-python@v6`, Docker actions `@v4`/`@v7`, `vet-action@v1.1.12`, `wait-on-check-action@v1.9.1`).
-- Trivy also ignores unused dirsearch `native/Cargo.lock` crate advisories (`pyo3`, `quinn-proto`).
+- Publish `jonsjava/kitelon` to Docker Hub on `v*` tags after `test`, `vet`, and `clamav` succeed (reusable jobs; image build does not start until they pass).
+- Weekly rebuild workflow: Sunday 06:00 UTC `apt full-upgrade`, Trivy scan, push `latest` and `weekly-YYYY-MM-DD`.
+- Trivy HIGH/CRITICAL gate with intended-finding filters: path-scoped `.trivyignore.yaml` (Metasploit / Go-module test secrets), `security/trivy-intended.rego` (`linux-libc-dev`, pdfkit, dirsearch crates, scanner modules), and `trivy.yaml` skip-files for pinned Go binaries.
+- ClamAV workflow chowns `/var/lib/clamav` after cache restore so `freshclam` can write temp files.
+- GitHub Actions on Node 24 runtimes (`checkout@v5`, `cache@v5`, `setup-python@v6`, Docker actions `@v4`/`@v7`, `vet-action@v1.1.12`).
+
+### Docker image
+- Dedicated `kitelon` Metasploit DB user; `install.sh` bootstraps that user in containers so cached layers and older tags initialize `msfdb` correctly.
+
+## [0.3.7] - 2026-09-06
+
+### CI
+- GitHub Actions `test` (pytest), `vet` (SafeDep), and `clamav` (ClamAV) workflows with README badges.
+- Docker Hub publish workflow on version tags (Trivy scan before push).
 
 ## [0.3.6] - 2026-09-06
 

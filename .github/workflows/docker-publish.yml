@@ -6,21 +6,30 @@ on:
 
 permissions:
   contents: read
-  checks: read
 
 jobs:
+  test:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  vet:
+    uses: ./.github/workflows/vet.yml
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+
+  clamav:
+    uses: ./.github/workflows/malware-scan.yml
+    permissions:
+      contents: read
+
   publish:
+    needs: [test, vet, clamav]
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
-      - name: Wait for CI checks
-        uses: lewagon/wait-on-check-action@v1.9.1
-        with:
-          ref: ${{ github.sha }}
-          check-regexp: ^(test|vet|clamav)$
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-          wait-interval: 30
-
       - name: Checkout
         uses: actions/checkout@v5
 

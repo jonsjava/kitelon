@@ -18,7 +18,7 @@ GitHub Actions workflows on every push and pull request to `main`:
 - [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) — **test** (`pytest tests/`)
 - [`.github/workflows/vet.yml`](../.github/workflows/vet.yml) — **vet** ([SafeDep vet](https://github.com/safedep/vet/releases) dependency scan; PRs scan changed manifests)
 - [`.github/workflows/malware-scan.yml`](../.github/workflows/malware-scan.yml) — **clamav** ([ClamAV](https://www.clamav.net/) file scan on the Ubuntu runner; definitions cached between runs)
-- [`.github/workflows/docker-publish.yml`](../.github/workflows/docker-publish.yml) — **publish** (push `jonsjava/kitelon` to Docker Hub on `v*` tags, after `test`/`vet`/`clamav` pass and Trivy scan succeeds)
+- [`.github/workflows/docker-publish.yml`](../.github/workflows/docker-publish.yml) — **publish** (on `v*` tags: reusable `test`/`vet`/`clamav` jobs, then Docker build, Trivy, push to Docker Hub)
 - [`.github/workflows/docker-weekly.yml`](../.github/workflows/docker-weekly.yml) — **publish** (Sundays 06:00 UTC: run checks, `apt full-upgrade` in the image, rebuild, Trivy scan, push `latest` and `weekly-YYYY-MM-DD`)
 
 To require all three before merging to `main`, enable branch protection on GitHub: **Settings → Branches → Branch protection rules → `main` → Require status checks** and select `test`, `vet`, and `clamav`.
@@ -30,11 +30,11 @@ To require all three before merging to `main`, enable branch protection on GitHu
 3. Tag a release commit:
 
 ```bash
-git tag v0.3.7
-git push origin v0.3.7
+git tag v0.3.8
+git push origin v0.3.8
 ```
 
-That runs CI checks, builds the production `Dockerfile`, scans the image with Trivy (`trivy.yaml` + intended-finding ignores), and pushes `jonsjava/kitelon:latest` and `jonsjava/kitelon:v0.3.7`.
+That runs `test`, `vet`, and `clamav` first. The Docker build starts only after those jobs succeed, then Trivy scans the image (`trivy.yaml` + intended-finding ignores) and pushes `jonsjava/kitelon:latest` and `jonsjava/kitelon:v0.3.8`.
 
 Local ClamAV scan (optional):
 
