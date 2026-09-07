@@ -2,12 +2,6 @@
 
 All notable changes to Kitelon are documented here.
 
-## [Unreleased]
-
-### Install / Docker
-- Upgrade pip `cryptography` to >=50.0.0 (and `pyOpenSSL` with it) after plugin requirements so Trivy no longer fails publish on CVE-2026-69247, CVE-2026-69249, and GHSA-537c-gmf6-5ccf.
-- Fix stale `*.dist-info` prune regex so leftover pip METADATA dirs are actually removed.
-
 ## [0.4.0] - 2026-09-07
 
 ### Web UI
@@ -28,6 +22,8 @@ All notable changes to Kitelon are documented here.
 - Pin Go 1.27.0 tarball SHA256 for linux/darwin amd64 and arm64 (fallback to go.dev JSON for other arches).
 - Upgrade-safe plugin/git installs: fetch+reset fallback, wrapper helpers that replace dangling symlinks (testssl.sh, enum4linux-ng).
 - Go tools install to `$GOPATH/bin` and symlink into PATH (fixes re-install when `/usr/local/bin` already has symlinks).
+- Upgrade pip `cryptography` to >=50.0.0 (and `pyOpenSSL` with it) after plugin requirements so Trivy no longer fails publish on CVE-2026-69247, CVE-2026-69249, and GHSA-537c-gmf6-5ccf.
+- Fix stale `*.dist-info` prune regex so leftover pip METADATA dirs are actually removed.
 
 ### CI
 - Document `main` branch protection: PRs required; `test`, `vet`, and `clamav` must pass before merge.
