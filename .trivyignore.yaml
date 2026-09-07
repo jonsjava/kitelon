@@ -2,6 +2,19 @@
 # Trivy requires an explicit --ignorefile / ignorefile: for YAML (experimental).
 # Secret IDs must be exact; paths use doublestar globs against the image target.
 
+vulnerabilities:
+  # Unused Rust lockfile shipped with the dirsearch git checkout (Python-only).
+  - id: GHSA-36hh-v3qg-5jq4
+    paths:
+      - "usr/share/kitelon/plugins/dirsearch/native/Cargo.lock"
+      - "/usr/share/kitelon/plugins/dirsearch/native/Cargo.lock"
+    statement: dirsearch native Cargo.lock is not built or executed
+  - id: GHSA-4w2j-m93h-cj5j
+    paths:
+      - "usr/share/kitelon/plugins/dirsearch/native/Cargo.lock"
+      - "/usr/share/kitelon/plugins/dirsearch/native/Cargo.lock"
+    statement: dirsearch native Cargo.lock is not built or executed
+
 secrets:
   # Metasploit ships known vendor keys, wordlists, and module fixtures on purpose.
   - id: private-key

@@ -30,3 +30,6 @@ scan:
     - "usr/local/bin/nuclei"
     - "usr/local/bin/subfinder"
     - "usr/local/bin/tlsx"
+    # dirsearch is the Python tree; native/Cargo.lock is unused Rust scaffolding.
+    - "/usr/share/kitelon/plugins/dirsearch/native/Cargo.lock"
+    - "usr/share/kitelon/plugins/dirsearch/native/Cargo.lock"

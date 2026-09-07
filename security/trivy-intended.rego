@@ -21,9 +21,20 @@ ignore {
 }
 
 # dirsearch ships a native Cargo.lock; we consume the Python tree, not those crates.
+# Cargo findings often have an empty PkgPath, so match crate names too.
 ignore {
 	input.Type == "vulnerability"
 	contains(input.PkgPath, "plugins/dirsearch/")
+}
+
+ignore {
+	input.Type == "vulnerability"
+	intended_dirsearch_crate[input.PkgName]
+}
+
+intended_dirsearch_crate := {
+	"pyo3",
+	"quinn-proto",
 }
 
 # ProjectDiscovery / ffuf / gobuster / gau / gowitness binaries from

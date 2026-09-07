@@ -8,6 +8,7 @@ All notable changes to Kitelon are documented here.
 - Trivy publish scan ignores intended findings: Metasploit and Go-module test secrets (path-scoped `.trivyignore.yaml`), kernel header / pdfkit / dirsearch / scanner-module CVEs (`security/trivy-intended.rego`), and shipped Go tool binaries (`trivy.yaml`).
 - ClamAV workflow chowns `/var/lib/clamav` to `clamav` after cache restore so `freshclam` can write temp files.
 - GitHub Actions bumped to Node 24 runtimes (`checkout@v5`, `cache@v5`, `setup-python@v6`, Docker actions `@v4`/`@v7`, `vet-action@v1.1.12`, `wait-on-check-action@v1.9.1`).
+- Trivy also ignores unused dirsearch `native/Cargo.lock` crate advisories (`pyo3`, `quinn-proto`).
 
 ## [0.3.6] - 2026-09-06
 
