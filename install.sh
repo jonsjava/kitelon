@@ -183,7 +183,7 @@ import shutil
 import sys
 
 pkg = sys.argv[1]
-pat = re.compile(rf"^{re.escape(pkg)}-([0-9][0-9A-Za-z.]*)\\.dist-info$")
+pat = re.compile(rf"^{re.escape(pkg)}-([0-9][0-9A-Za-z.]*)\.dist-info$")
 
 def ver_key(name: str) -> tuple:
     m = pat.match(name)
@@ -204,6 +204,21 @@ for site in pathlib.Path("/usr/local/lib").glob("python3.*/dist-packages"):
     for stale in infos[:-1]:
         shutil.rmtree(stale, ignore_errors=True)
 PY
+}
+
+# Plugin requirements (dirsearch, enum4linux-ng) can leave cryptography 47.x.
+# Trivy HIGH: CVE-2026-69247 / CVE-2026-69249 / GHSA-537c-gmf6-5ccf, fixed in 50.0.0.
+# Upgrade pyOpenSSL in the same pip run so an older pin cannot block cryptography 50.
+kitelon_pip_ensure_cryptography() {
+    kl_msg_info "Upgrading cryptography (>=50.0.0)"
+    if kitelon_pip_install install --upgrade 'cryptography>=50.0.0' 'pyOpenSSL>=26.0.0' --break-system-packages \
+        || kitelon_pip_install install --upgrade 'cryptography>=50.0.0' 'pyOpenSSL>=26.0.0' --break-system-packages --user; then
+        kitelon_pip_prune_stale_distinfo cryptography
+        kl_msg_ok "cryptography >=50.0.0"
+        return 0
+    fi
+    warn_optional "cryptography upgrade to >=50.0.0 failed"
+    return 1
 }
 
 _pkg_install_run() {
@@ -1066,6 +1081,7 @@ exec bash \"$testssl_repo/testssl.sh\" \"\$@\""
     
     kl_msg_info "Installing engine tools (enum4linux-ng, smbmap)..."
     install_smb_engine_tools
+    kitelon_pip_ensure_cryptography || true
 }
 
 install_smb_engine_tools() {

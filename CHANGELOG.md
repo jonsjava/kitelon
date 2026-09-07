@@ -4,6 +4,10 @@ All notable changes to Kitelon are documented here.
 
 ## [Unreleased]
 
+### Install / Docker
+- Upgrade pip `cryptography` to >=50.0.0 (and `pyOpenSSL` with it) after plugin requirements so Trivy no longer fails publish on CVE-2026-69247, CVE-2026-69249, and GHSA-537c-gmf6-5ccf.
+- Fix stale `*.dist-info` prune regex so leftover pip METADATA dirs are actually removed.
+
 ## [0.3.9] - 2026-09-06
 
 ### Install / Docker
