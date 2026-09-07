@@ -1,0 +1,33 @@
+# Path-scoped ignores for findings that are part of the product.
+# Trivy requires an explicit --ignorefile / ignorefile: for YAML (experimental).
+# Secret IDs must be exact; paths use doublestar globs against the image target.
+
+secrets:
+  # Metasploit ships known vendor keys, wordlists, and module fixtures on purpose.
+  - id: private-key
+    paths:
+      - "/opt/metasploit-framework/**"
+      - "opt/metasploit-framework/**"
+    statement: Metasploit exploit payloads and known-private-key modules
+  - id: aws-access-key-id
+    paths:
+      - "/opt/metasploit-framework/**"
+      - "opt/metasploit-framework/**"
+    statement: Metasploit wordlists and test fixtures (e.g. AKIAEXAMPLE)
+  - id: stripe-secret-token
+    paths:
+      - "/opt/metasploit-framework/**"
+      - "opt/metasploit-framework/**"
+    statement: Metasploit wordlists and redaction specs
+  - id: slack-access-token
+    paths:
+      - "/opt/metasploit-framework/**"
+      - "opt/metasploit-framework/**"
+    statement: Metasploit wordlists
+
+  # go install leaves module cache test keys in GOPATH (not runtime secrets).
+  - id: private-key
+    paths:
+      - "/usr/local/share/kitelon-go/pkg/mod/**"
+      - "usr/local/share/kitelon-go/pkg/mod/**"
+    statement: Third-party Go module testdata keys from go install

@@ -4,6 +4,9 @@ All notable changes to Kitelon are documented here.
 
 ## [Unreleased]
 
+### Docker / CI
+- Trivy publish scan ignores intended findings: Metasploit and Go-module test secrets (path-scoped `.trivyignore.yaml`), kernel header / pdfkit / dirsearch / scanner-module CVEs (`security/trivy-intended.rego`), and shipped Go tool binaries (`trivy.yaml`).
+
 ## [0.3.6] - 2026-09-06
 
 ### Modularity (plugin / addon / pack)

@@ -34,7 +34,7 @@ git tag v0.3.7
 git push origin v0.3.7
 ```
 
-That runs CI checks, builds the production `Dockerfile`, scans the image with Trivy, and pushes `jonsjava/kitelon:latest` and `jonsjava/kitelon:v0.3.7`.
+That runs CI checks, builds the production `Dockerfile`, scans the image with Trivy (`trivy.yaml` + intended-finding ignores), and pushes `jonsjava/kitelon:latest` and `jonsjava/kitelon:v0.3.7`.
 
 Local ClamAV scan (optional):
 

@@ -15,6 +15,8 @@ Kitelon runs offensive tooling on operator-supplied targets. Root CLI access, ra
 - testssl.sh installed from git; restore never uses raw URL fallback.
 - SecLists and vulners NSE fetched from known GitHub URLs during install.
 
+Image publish runs [Trivy](https://trivy.dev/) at HIGH/CRITICAL. Intended findings are filtered by [`.trivyignore.yaml`](../.trivyignore.yaml) (Metasploit / Go-module test secrets, path-scoped) and [`security/trivy-intended.rego`](../security/trivy-intended.rego) (`linux-libc-dev` headers, pdfkit, dirsearch lockfile, scanner module CVEs). Shipped scanner binaries are listed in [`trivy.yaml`](../trivy.yaml). A real secret or CVE outside those paths still fails the job.
+
 Review `install.sh` before air-gapped deployments.
 
 ## Data and permissions

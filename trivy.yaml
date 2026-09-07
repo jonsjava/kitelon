@@ -1,0 +1,32 @@
+# Shared Trivy config for docker-publish and docker-weekly.
+# Action inputs (severity, exit-code) still override these defaults.
+
+ignorefile: .trivyignore.yaml
+ignore-policy: security/trivy-intended.rego
+
+# Shipped scanner binaries from conf/go-tool-versions.conf. New CVEs in
+# their vendored modules are accepted until we bump those pins.
+scan:
+  skip-files:
+    - "/usr/local/bin/dnsx"
+    - "/usr/local/bin/ffuf"
+    - "/usr/local/bin/gau"
+    - "/usr/local/bin/gobuster"
+    - "/usr/local/bin/gowitness"
+    - "/usr/local/bin/httpx"
+    - "/usr/local/bin/katana"
+    - "/usr/local/bin/naabu"
+    - "/usr/local/bin/nuclei"
+    - "/usr/local/bin/subfinder"
+    - "/usr/local/bin/tlsx"
+    - "usr/local/bin/dnsx"
+    - "usr/local/bin/ffuf"
+    - "usr/local/bin/gau"
+    - "usr/local/bin/gobuster"
+    - "usr/local/bin/gowitness"
+    - "usr/local/bin/httpx"
+    - "usr/local/bin/katana"
+    - "usr/local/bin/naabu"
+    - "usr/local/bin/nuclei"
+    - "usr/local/bin/subfinder"
+    - "usr/local/bin/tlsx"
