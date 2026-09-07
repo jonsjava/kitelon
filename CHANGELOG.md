@@ -16,6 +16,7 @@ All notable changes to Kitelon are documented here.
 - Jobs page: incremental table updates on poll (status pills, no full tbody rebuild); running-row pulse animation.
 - Shared header nav via `KitelonUI.renderNav()` across all pages.
 - Chart.js doughnut helper in `web/static/charts.js`.
+- Fix Web UI API key loading: always source `/root/.kitelon_api_keys.conf`; unset empty `WEB_API_KEY` before startup.
 
 ## [0.3.9] - 2026-09-06
 
