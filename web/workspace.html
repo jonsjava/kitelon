@@ -7,14 +7,7 @@
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <header>
-    <h1 id="title">Workspace</h1>
-    <nav>
-      <a href="/">Workspaces</a>
-      <a href="/jobs.html">Jobs</a>
-      <a href="/schedules.html">Schedules</a>
-    </nav>
-  </header>
+  <header id="app-header"></header>
   <main>
     <div class="toolbar">
       <p id="meta" class="meta"></p>
@@ -170,10 +163,10 @@
   </main>
   <script src="/static/app.js"></script>
   <script>
-    const { api, download, upload, reportPdfUrl, artifactUrl, formatBytes, stat, fillRow } = KitelonUI;
+    const { api, download, upload, reportPdfUrl, artifactUrl, formatBytes, stat, fillRow, renderNav } = KitelonUI;
     const params = new URLSearchParams(location.search);
     const alias = params.get("alias");
-    document.getElementById("title").textContent = alias || "Workspace";
+    renderNav(null, alias || "Workspace");
 
     let lastImportedAt = null;
 

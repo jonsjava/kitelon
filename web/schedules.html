@@ -7,17 +7,10 @@
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <header>
-    <h1>Scheduled scans</h1>
-    <nav>
-      <a href="/">Workspaces</a>
-      <a href="/jobs.html">Jobs</a>
-      <a href="/schedules.html" class="active">Schedules</a>
-    </nav>
-  </header>
+  <header id="app-header"></header>
   <main>
     <form id="create-schedule">
-      <h2 style="margin:0;color:#fff;font-size:1rem">New schedule</h2>
+      <h2 class="section-heading">New schedule</h2>
       <label>Workspace
         <input name="workspace" data-workspace-input required placeholder="myscope">
       </label>
@@ -50,9 +43,11 @@
   <script src="/static/app.js"></script>
   <script>
     const {
-      api, validateWorkspaceAlias, sanitizeWorkspaceAlias,
+      api, renderNav, validateWorkspaceAlias, sanitizeWorkspaceAlias,
       scanOptionsFromForm, renderScanOptions, fillModeSelect, fillRow,
     } = KitelonUI;
+
+    renderNav("schedules", "Scheduled scans");
 
     let scanConfig = null;
 

@@ -276,6 +276,32 @@
     return (i ? v.toFixed(1) : v) + " " + units[i];
   }
 
+  const NAV_ITEMS = [
+    { id: "workspaces", href: "/", label: "Workspaces" },
+    { id: "jobs", href: "/jobs.html", label: "Jobs" },
+    { id: "schedules", href: "/schedules.html", label: "Schedules" },
+  ];
+
+  function renderNav(active, title) {
+    let header = document.getElementById("app-header");
+    if (!header) {
+      header = document.querySelector("header");
+    }
+    if (!header) return;
+    header.id = "app-header";
+    header.innerHTML = "";
+    header.appendChild(el("h1", null, title || "Kitelon"));
+    const nav = el("nav");
+    NAV_ITEMS.forEach((item) => {
+      const a = document.createElement("a");
+      a.href = item.href;
+      a.textContent = item.label;
+      if (item.id === active) a.className = "active";
+      nav.appendChild(a);
+    });
+    header.appendChild(nav);
+  }
+
   window.KitelonUI = {
     api,
     download,
@@ -290,6 +316,7 @@
     sslReportPdfUrl,
     artifactUrl,
     formatBytes,
+    renderNav,
     apiKeyStorage: KEY,
     sanitizeWorkspaceAlias,
     validateWorkspaceAlias,

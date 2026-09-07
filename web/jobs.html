@@ -7,17 +7,10 @@
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <header>
-    <h1>Job queue</h1>
-    <nav>
-      <a href="/">Workspaces</a>
-      <a href="/jobs.html" class="active">Jobs</a>
-      <a href="/schedules.html">Schedules</a>
-    </nav>
-  </header>
+  <header id="app-header"></header>
   <main>
     <form id="enqueue" class="scan-form">
-      <h2 style="margin:0;color:#fff;font-size:1rem">Enqueue scan</h2>
+      <h2 class="section-heading">Enqueue scan</h2>
       <label>Workspace
         <input name="workspace" data-workspace-input required placeholder="myscope">
         <span class="field-hint">Letters, digits, . _ - only</span>
@@ -37,28 +30,40 @@
       <button type="submit">Enqueue</button>
     </form>
 
-    <form id="reimport">
-      <h2 style="margin:0;color:#fff;font-size:1rem">Import workspace loot</h2>
+    <form id="reimport" class="panel-form">
+      <h2 class="section-heading">Import workspace loot</h2>
       <label>Workspace
         <input name="workspace" data-workspace-input required placeholder="phase1-test">
       </label>
       <button type="submit">Queue import + report</button>
     </form>
 
-    <table>
-      <thead>
-        <tr><th>ID</th><th>Status</th><th>Type</th><th>Workspace</th><th>Target</th><th>Mode</th><th>Priority</th><th>Error</th><th></th></tr>
-      </thead>
-      <tbody id="jobs"></tbody>
-    </table>
+    <section class="jobs-section">
+      <div class="page-toolbar">
+        <h2 class="page-title">Recent jobs</h2>
+        <span id="jobs-refresh-hint" class="meta">Auto-refresh every 15s</span>
+      </div>
+      <div class="table-wrap">
+        <table class="jobs-table">
+          <thead>
+            <tr><th>ID</th><th>Status</th><th>Type</th><th>Workspace</th><th>Target</th><th>Mode</th><th>Priority</th><th>Error</th><th></th></tr>
+          </thead>
+          <tbody id="jobs"></tbody>
+        </table>
+      </div>
+    </section>
     <p id="error" class="error"></p>
   </main>
   <script src="/static/app.js"></script>
+  <script src="/static/jobs.js"></script>
   <script>
     const {
-      api, validateWorkspaceAlias, sanitizeWorkspaceAlias,
+      api, renderNav, validateWorkspaceAlias, sanitizeWorkspaceAlias,
       scanOptionsFromForm, renderScanOptions, fillModeSelect,
     } = KitelonUI;
+    const { syncJobsTable } = KitelonJobs;
+
+    renderNav("jobs", "Job queue");
 
     function workspaceFromForm(fd) {
       const value = sanitizeWorkspaceAlias(fd.get("workspace"));
@@ -67,11 +72,8 @@
       return value;
     }
 
-    function addCell(tr, text, cls) {
-      const td = document.createElement("td");
-      if (cls) td.className = cls;
-      td.textContent = text != null ? text : "";
-      tr.appendChild(td);
+    function showError(message) {
+      document.getElementById("error").textContent = message || "";
     }
 
     async function loadScanConfig() {
@@ -82,96 +84,12 @@
 
     async function loadJobs() {
       const tbody = document.getElementById("jobs");
-      const err = document.getElementById("error");
-      tbody.innerHTML = "";
-      err.textContent = "";
+      showError("");
       try {
         const jobs = await api("/api/v1/jobs?limit=50");
-        jobs.forEach((j) => {
-          const tr = document.createElement("tr");
-          if (j.status === "failed") tr.className = "job-failed";
-          addCell(tr, j.id);
-          addCell(tr, j.status, "status-" + j.status);
-          addCell(tr, j.job_type);
-          addCell(tr, j.workspace_alias || "");
-          addCell(tr, j.target || "");
-          addCell(tr, j.mode || "");
-          addCell(tr, j.priority != null ? j.priority : "");
-          const errTd = document.createElement("td");
-          errTd.className = "job-error";
-          if (j.error_message) {
-            errTd.textContent = j.error_message;
-            errTd.title = j.error_message;
-          } else if (j.status === "failed" && j.exit_code != null) {
-            errTd.textContent = "exit code " + j.exit_code;
-          }
-          tr.appendChild(errTd);
-          const actTd = document.createElement("td");
-          actTd.className = "job-actions";
-          if (j.status === "pending") {
-            const edit = document.createElement("button");
-            edit.type = "button";
-            edit.className = "secondary btn-sm";
-            edit.textContent = "Edit";
-            edit.addEventListener("click", async () => {
-              const p = prompt("Priority (lower runs sooner):", String(j.priority != null ? j.priority : 100));
-              if (p == null) return;
-              const t = prompt("Target:", j.target || "");
-              if (t == null) return;
-              try {
-                await api("/api/v1/jobs/" + j.id, {
-                  method: "PATCH",
-                  body: JSON.stringify({ priority: parseInt(p, 10), target: t }),
-                });
-                loadJobs();
-              } catch (e) {
-                document.getElementById("error").textContent = e.message;
-              }
-            });
-            actTd.appendChild(edit);
-          }
-          if (j.status === "failed" || j.status === "completed" || j.status === "cancelled") {
-            const btn = document.createElement("button");
-            btn.type = "button";
-            btn.className = "secondary btn-sm";
-            btn.textContent = "Re-queue";
-            btn.addEventListener("click", async () => {
-              btn.disabled = true;
-              try {
-                await api("/api/v1/jobs/" + j.id + "/retry", { method: "POST", body: "{}" });
-                loadJobs();
-              } catch (e) {
-                document.getElementById("error").textContent = e.message;
-                btn.disabled = false;
-              }
-            });
-            actTd.appendChild(btn);
-          }
-          const del = document.createElement("button");
-          del.type = "button";
-          del.className = "secondary btn-sm";
-          del.textContent = j.status === "running" ? "Cancel" : "Delete";
-          del.addEventListener("click", async () => {
-            const msg = j.status === "running"
-              ? "Cancel running job #" + j.id + "?"
-              : "Delete job #" + j.id + "?";
-            if (!confirm(msg)) return;
-            del.disabled = true;
-            try {
-              const q = j.status === "running" ? "?kill=true" : "";
-              await api("/api/v1/jobs/" + j.id + q, { method: "DELETE" });
-              loadJobs();
-            } catch (e) {
-              document.getElementById("error").textContent = e.message;
-              del.disabled = false;
-            }
-          });
-          actTd.appendChild(del);
-          tr.appendChild(actTd);
-          tbody.appendChild(tr);
-        });
+        syncJobsTable(tbody, jobs, api, showError, loadJobs);
       } catch (e) {
-        err.textContent = e.message;
+        showError(e.message);
       }
     }
 
@@ -195,7 +113,7 @@
         });
         loadJobs();
       } catch (e) {
-        document.getElementById("error").textContent = e.message;
+        showError(e.message);
       }
     });
 
@@ -210,7 +128,7 @@
         });
         loadJobs();
       } catch (e) {
-        document.getElementById("error").textContent = e.message;
+        showError(e.message);
       }
     });
 

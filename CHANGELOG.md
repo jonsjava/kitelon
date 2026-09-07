@@ -8,6 +8,15 @@ All notable changes to Kitelon are documented here.
 - Upgrade pip `cryptography` to >=50.0.0 (and `pyOpenSSL` with it) after plugin requirements so Trivy no longer fails publish on CVE-2026-69247, CVE-2026-69249, and GHSA-537c-gmf6-5ccf.
 - Fix stale `*.dist-info` prune regex so leftover pip METADATA dirs are actually removed.
 
+## [0.4.0] - 2026-09-07
+
+### Web UI
+- Sleek dark theme refresh (evolved custom CSS; no JS framework bundler).
+- Workspaces home: summary strip, collapsible create/import panel, severity donut charts (ring = findings by severity, center = risk score), 30s incremental stat refresh.
+- Jobs page: incremental table updates on poll (status pills, no full tbody rebuild); running-row pulse animation.
+- Shared header nav via `KitelonUI.renderNav()` across all pages.
+- Chart.js doughnut helper in `web/static/charts.js`.
+
 ## [0.3.9] - 2026-09-06
 
 ### Install / Docker
