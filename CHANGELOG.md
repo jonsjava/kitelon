@@ -8,6 +8,7 @@ All notable changes to Kitelon are documented here.
 - Bump Go toolchain to 1.27.3 (pinned tarball SHA256 updated) for CVE-2026-111943, CVE-2026-78667, CVE-2026-78669, and CVE-2026-97031 in Go stdlib.
 
 ### CI
+- `vet`: run the vet-action step only on push / pull_request. The action throws "Unsupported event type: workflow_dispatch" (manual docker-weekly runs failed) and does nothing on schedule.
 - `docker-weekly`: build with `no-cache: true` (still writes the GHA cache). Every layer was restored from cache, so the weekly refresh never re-ran `apt-get full-upgrade` or `install.sh` and kept shipping stale packages (e.g. certifi 2026.7.22, GHSA-6q48-6c7w-9gw2), failing the Trivy scan.
 
 ## [0.4.0] - 2026-09-07
