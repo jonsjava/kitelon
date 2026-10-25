@@ -20,7 +20,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      # vet-action only scans push and pull_request events. It throws on
+      # workflow_dispatch and is a no-op on schedule, so skip it when called
+      # from docker-weekly (scheduled or manual). Push/PR runs still scan.
       - name: Scan dependencies with vet
+        if: contains(fromJSON('["push", "pull_request", "pull_request_target"]'), github.event_name)
         uses: safedep/vet-action@v1.1.12
         with:
           version: v1.19.0
