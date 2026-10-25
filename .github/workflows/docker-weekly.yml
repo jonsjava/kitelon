@@ -52,12 +52,14 @@ jobs:
         with:
           context: .
           pull: true
+          # Weekly refresh must re-run apt full-upgrade and install.sh; a cache
+          # hit would ship the same layers (and stale CVEs) every week.
+          no-cache: true
           push: false
           load: true
           tags: |
             jonsjava/kitelon:latest
             jonsjava/kitelon:${{ env.IMAGE_TAG }}
-          cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Scan image with Trivy

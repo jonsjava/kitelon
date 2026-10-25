@@ -16,7 +16,7 @@ INSTALL_DIR=/usr/share/kitelon
 LOOT_DIR=/usr/share/kitelon/loot
 PLUGINS_DIR=/usr/share/kitelon/plugins
 GO_DIR=~/go/bin
-KITELON_GO_VERSION="1.27.0"
+KITELON_GO_VERSION="1.27.3"
 IS_KALI=0
 DISTRO_ID=""
 
@@ -679,17 +679,17 @@ kitelon_go_tarball_arch() {
 kitelon_go_tarball_sha256() {
     local tarball="$1"
     case "$tarball" in
-        go1.27.0.linux-amd64.tar.gz)
-            echo "675c26c449cbb18fc24b74650de1eabbae6e16f64326fd85a283fb3b58280685"
+        go1.27.3.linux-amd64.tar.gz)
+            echo "65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40"
             ;;
-        go1.27.0.linux-arm64.tar.gz)
-            echo "51798d2c42d0e1c6ed7fd9f48728b4193abac9e8aad6dbac2fe96a81f5909bda"
+        go1.27.3.linux-arm64.tar.gz)
+            echo "a06e99309dbcbdca1a8ccd2282c3ee146e55930886e26b4f1193269587165f49"
             ;;
-        go1.27.0.darwin-amd64.tar.gz)
-            echo "d3314e25496e4381d71a5c51d2907e7af655d199f6780b549f015bd85fef4986"
+        go1.27.3.darwin-amd64.tar.gz)
+            echo "b6f8e931e4ab497fcde6da8ae4499a58f9d258e55c8a80824a516eae5950a750"
             ;;
-        go1.27.0.darwin-arm64.tar.gz)
-            echo "90493b3bbd5e10f91d12153198bf1994fd756399b4fec93b49b0c6e2acdeeb3e"
+        go1.27.3.darwin-arm64.tar.gz)
+            echo "dd3908cf20959d798c1e06ebe5b72213f0505ce01373b40ce3110975a6cd99c2"
             ;;
         *)
             python3 - <<'PY' "$tarball"
