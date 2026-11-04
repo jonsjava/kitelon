@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Bundle every Kitelon report for a workspace into a single ZIP of PDFs.
+"""Bundle every Kitelon report for a workspace into a single ZIP.
 
 Collects the main scan report, the pentest workbook, the SSL/TLS index, and
-each per-host SSL/TLS report, renders each to PDF, and packs them into one
-ZIP archive. A report that is not available (e.g. no SSL scan data) is skipped
-rather than failing the whole bundle; only a total lack of a working PDF
-toolchain surfaces as an error.
+each per-host SSL/TLS report, and packs each one into one ZIP archive as a PDF
+plus the HTML it was rendered from. A report that is not available (e.g. no
+SSL scan data) is skipped rather than failing the whole bundle. If the PDF
+toolchain is missing, the HTML is still bundled and MISSING-PDFS.txt lists
+what could not be rendered.
 """
 
 from __future__ import annotations
@@ -61,57 +62,28 @@ def _store_pdf(
         log(f"report bundle: could not cache {pdf_rel} ({exc})")
 
 
-def _main_report_pdf(
-    conn: Any,
-    workspace_id: int,
-    loot_dir: Path,
-    *,
-    force: bool,
-) -> bytes | None:
-    if not force and artifacts_enabled():
-        cached = get_artifact_bytes(conn, workspace_id, MAIN_REPORT_PDF)
-        if cached:
-            return cached
-
+def _main_report_html(conn: Any, workspace_id: int, loot_dir: Path) -> str | None:
     html_bytes = get_artifact_bytes(conn, workspace_id, MAIN_REPORT_HTML)
     if html_bytes is None:
         html_path = loot_dir / MAIN_REPORT_HTML
         if not html_path.is_file():
             return None
         html_bytes = html_path.read_bytes()
-
-    pdf_bytes = export_pdf_bytes(
-        html_content=html_bytes.decode("utf-8", errors="replace"),
-        force=True,
-    )
-    _store_pdf(conn, workspace_id, loot_dir, MAIN_REPORT_PDF, pdf_bytes)
-    return pdf_bytes
+    return html_bytes.decode("utf-8", errors="replace")
 
 
-def _pentest_report_pdf(
-    conn: Any,
-    workspace_id: int,
-    loot_dir: Path,
-    workspace: str,
-    *,
-    force: bool,
-) -> bytes | None:
-    from kitelon_pentest_report import get_pentest_report_html
-
-    if not force and artifacts_enabled():
-        cached = get_artifact_bytes(conn, workspace_id, PENTEST_REPORT_PDF)
+def _cached_pdf(conn: Any, workspace_id: int, loot_dir: Path, pdf_rel: str) -> bytes | None:
+    if artifacts_enabled():
+        cached = get_artifact_bytes(conn, workspace_id, pdf_rel)
         if cached:
             return cached
-
-    html = get_pentest_report_html(conn, workspace_id, loot_dir, workspace)
-    if not html:
-        return None
-    pdf_bytes = export_pdf_bytes(html_content=html, force=True)
-    _store_pdf(conn, workspace_id, loot_dir, PENTEST_REPORT_PDF, pdf_bytes)
-    return pdf_bytes
+    pdf_path = loot_dir / pdf_rel
+    if pdf_path.is_file():
+        return pdf_path.read_bytes()
+    return None
 
 
-def collect_report_pdfs(
+def collect_report_files(
     conn: Any,
     workspace_id: int,
     loot_dir: Path,
@@ -119,12 +91,14 @@ def collect_report_pdfs(
     *,
     force: bool = False,
     regenerate: bool = True,
+    include_html: bool = True,
 ) -> tuple[list[tuple[str, bytes]], list[str]]:
-    """Return ``([(arcname, pdf_bytes), ...], [tool_error, ...])``.
+    """Return ``([(arcname, bytes), ...], [tool_error, ...])``.
 
-    ``tool_error`` entries record reports that failed because the PDF
-    toolchain was unavailable; callers decide whether an empty bundle with
-    tool errors should be a 503.
+    Each report contributes its PDF and, when ``include_html`` is set, the HTML
+    it was rendered from (same base name, ``.html``). ``tool_error`` entries
+    record PDFs that failed because the PDF toolchain was unavailable; their
+    HTML is still included.
     """
     loot_dir = loot_dir.resolve()
 
@@ -136,75 +110,79 @@ def collect_report_pdfs(
         except Exception as exc:  # noqa: BLE001 - bundle collects whatever exists
             log(f"report bundle: report generation step failed ({exc})")
 
-    pdfs: list[tuple[str, bytes]] = []
+    files: list[tuple[str, bytes]] = []
     tool_errors: list[str] = []
 
-    def add(label: str, arcname: str, producer) -> None:
+    def add(label: str, base: str, html_producer, pdf_rel: str) -> None:
         try:
-            data = producer()
-        except ReportToolError as exc:
-            tool_errors.append(f"{label}: {exc}")
-            log(f"report bundle: {label} skipped ({exc})")
-            return
-        except ReportError as exc:
-            log(f"report bundle: {label} skipped ({exc})")
-            return
+            html = html_producer()
         except Exception as exc:  # noqa: BLE001
             log(f"report bundle: {label} skipped ({exc})")
             return
-        if data:
-            pdfs.append((arcname, data))
+        if not html:
+            return
+        if include_html:
+            files.append((f"{base}.html", html.encode("utf-8")))
+
+        pdf_bytes = None if force else _cached_pdf(conn, workspace_id, loot_dir, pdf_rel)
+        if pdf_bytes is None:
+            try:
+                pdf_bytes = export_pdf_bytes(html_content=html, force=True)
+            except ReportToolError as exc:
+                tool_errors.append(f"{label}: {exc}")
+                log(f"report bundle: {label} PDF skipped ({exc})")
+                return
+            except ReportError as exc:
+                log(f"report bundle: {label} PDF skipped ({exc})")
+                return
+            _store_pdf(conn, workspace_id, loot_dir, pdf_rel, pdf_bytes)
+        files.append((f"{base}.pdf", pdf_bytes))
 
     add(
         "scan report",
-        "kitelon-report.pdf",
-        lambda: _main_report_pdf(conn, workspace_id, loot_dir, force=force),
-    )
-    add(
-        "pentest workbook",
-        "pentest-report.pdf",
-        lambda: _pentest_report_pdf(
-            conn, workspace_id, loot_dir, workspace, force=force
-        ),
+        "kitelon-report",
+        lambda: _main_report_html(conn, workspace_id, loot_dir),
+        MAIN_REPORT_PDF,
     )
 
-    from kitelon_testssl import (
-        get_ssl_report_html,
-        get_ssl_report_pdf_bytes,
-        list_ssl_scan_summaries,
+    from kitelon_pentest_report import get_pentest_report_html
+
+    add(
+        "pentest workbook",
+        "pentest-report",
+        lambda: get_pentest_report_html(conn, workspace_id, loot_dir, workspace),
+        PENTEST_REPORT_PDF,
     )
+
+    from kitelon_env import ssl_report_pdf_rel_path
+    from kitelon_testssl import get_ssl_report_html, list_ssl_scan_summaries
 
     summaries = list_ssl_scan_summaries(loot_dir)
     if summaries:
-        def _ssl_index() -> bytes | None:
-            html = get_ssl_report_html(conn, workspace_id, loot_dir, workspace)
-            if not html:
-                return None
-            pdf_bytes = export_pdf_bytes(html_content=html, force=True)
-            _store_pdf(conn, workspace_id, loot_dir, SSL_REPORT_INDEX_PDF, pdf_bytes)
-            return pdf_bytes
-
-        add("ssl index", "ssl-report.pdf", _ssl_index)
-
+        add(
+            "ssl index",
+            "ssl-report",
+            lambda: get_ssl_report_html(conn, workspace_id, loot_dir, workspace),
+            SSL_REPORT_INDEX_PDF,
+        )
         for summary in summaries:
             host = str(summary.get("hostname") or "unknown")
             port = str(summary.get("port") or "443")
             safe = host.replace("/", "-")
             add(
                 f"ssl {host}:{port}",
-                f"ssl-{safe}-{port}.pdf",
-                lambda h=host, p=port: get_ssl_report_pdf_bytes(
-                    conn,
-                    workspace_id,
-                    loot_dir,
-                    workspace,
-                    hostname=h,
-                    port=p,
-                    force=force,
-                )[0],
+                f"ssl-{safe}-{port}",
+                lambda h=host, p=port: get_ssl_report_html(
+                    conn, workspace_id, loot_dir, workspace, hostname=h, port=p
+                ),
+                ssl_report_pdf_rel_path(host, port),
             )
 
-    return pdfs, tool_errors
+    return files, tool_errors
+
+
+# Backwards-compatible name used by earlier callers and tests.
+collect_report_pdfs = collect_report_files
 
 
 def export_reports_zip_bytes(
@@ -215,14 +193,16 @@ def export_reports_zip_bytes(
     *,
     force: bool = False,
     regenerate: bool = True,
+    include_html: bool = True,
 ) -> tuple[bytes, str]:
-    pdfs, tool_errors = collect_report_pdfs(
+    pdfs, tool_errors = collect_report_files(
         conn,
         workspace_id,
         loot_dir,
         workspace,
         force=force,
         regenerate=regenerate,
+        include_html=include_html,
     )
     if not pdfs:
         if tool_errors:
@@ -235,12 +215,20 @@ def export_reports_zip_bytes(
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for arcname, data in pdfs:
             zf.writestr(arcname, data)
+        if tool_errors:
+            note = (
+                "Some PDFs could not be rendered; their HTML versions are included.\n"
+                "Install pdfkit + wkhtmltopdf (sudo bash install.sh force) and export again.\n\n"
+                + "\n".join(tool_errors)
+                + "\n"
+            )
+            zf.writestr("MISSING-PDFS.txt", note)
     return buf.getvalue(), f"kitelon-{workspace}-reports.zip"
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Bundle all workspace reports into a ZIP of PDFs"
+        description="Bundle all workspace reports into a ZIP (PDF + HTML)"
     )
     parser.add_argument("--loot-dir", required=True, help="Workspace loot directory")
     parser.add_argument("--workspace", required=True, help="Workspace alias")
@@ -252,6 +240,11 @@ def main() -> None:
         "--force",
         action="store_true",
         help="Re-render PDFs even if a cached copy exists",
+    )
+    parser.add_argument(
+        "--no-html",
+        action="store_true",
+        help="Bundle PDFs only (leave out the HTML versions)",
     )
     parser.add_argument(
         "--no-regenerate",
@@ -277,6 +270,7 @@ def main() -> None:
                 args.workspace,
                 force=args.force,
                 regenerate=not args.no_regenerate,
+                include_html=not args.no_html,
             )
         except (ReportError, FileNotFoundError) as exc:
             print(str(exc), file=sys.stderr)

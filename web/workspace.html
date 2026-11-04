@@ -14,7 +14,7 @@
       <div class="toolbar-actions">
         <button type="button" id="pentest-report-btn" class="secondary">Pentest Workbook ↗</button>
         <button type="button" id="export-zip-btn" class="secondary">Export ZIP</button>
-        <button type="button" id="reports-zip-btn" class="secondary">Reports PDF (ZIP)</button>
+        <button type="button" id="reports-zip-btn" class="secondary">Reports (ZIP)</button>
         <button type="button" id="rename-btn" class="secondary">Rename</button>
         <button type="button" id="pdf-btn" class="secondary">Download PDF (all)</button>
         <button type="button" id="pdf-subset-btn" class="secondary">Report selected</button>
@@ -622,7 +622,7 @@
       const btn = document.getElementById("reports-zip-btn");
       const msg = document.getElementById("pdf-msg");
       btn.disabled = true;
-      if (msg) msg.textContent = "Rendering report PDFs…";
+      if (msg) msg.textContent = "Building report bundle…";
       try {
         await download(
           "/api/v1/workspaces/" + encodeURIComponent(alias) + "/reports.zip",

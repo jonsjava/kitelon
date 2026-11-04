@@ -150,7 +150,8 @@ $star SCAN CONTROL
 $star REPORTS
  kitelon -w <WORKSPACE> --reports-zip
  kitelon -w <WORKSPACE> --reports-zip --output /tmp/reports.zip
-   (renders all reports — scan, pentest, SSL/TLS — to PDF and packs them into one ZIP)
+ kitelon -w <WORKSPACE> --reports-zip --pdf-only
+   (packs all reports — scan, pentest, SSL/TLS — into one ZIP as PDF + HTML)
 
 $star ADMIN
  kitelon -w <WORKSPACE> --export
@@ -604,6 +605,10 @@ case $key in
     REPORTS_ZIP="1"
     shift
     ;;
+    --pdf-only)
+    REPORTS_PDF_ONLY="1"
+    shift
+    ;;
     --output)
     EXPORT_OUTPUT="$2"
     shift
@@ -869,8 +874,9 @@ if [[ "$REPORTS_ZIP" = "1" ]]; then
   BUNDLE_ARGS=(--loot-dir "$LOOT_DIR" --workspace "$WORKSPACE")
   [[ -n "$EXPORT_OUTPUT" ]] && BUNDLE_ARGS+=(--output "$EXPORT_OUTPUT")
   [[ -n "$TESTSSL_FORCE" ]] && BUNDLE_ARGS+=(--force)
+  [[ -n "$REPORTS_PDF_ONLY" ]] && BUNDLE_ARGS+=(--no-html)
   python3 "$INSTALL_DIR/bin/kitelon_report_bundle.py" "${BUNDLE_ARGS[@]}" || exit 1
-  echo -e "$KL_C_OK[✓]$KL_RESET report PDF bundle saved for workspace $WORKSPACE"
+  echo -e "$KL_C_OK[✓]$KL_RESET report bundle saved for workspace $WORKSPACE"
   exit 0
 fi
 

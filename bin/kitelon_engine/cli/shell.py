@@ -453,6 +453,7 @@ class KitelonShell(Cmd):
     p.add_argument("alias")
     p.add_argument("-o", "--output", help="Output ZIP path (default: loot reports/ dir)")
     p.add_argument("--force", action="store_true", help="Re-render PDFs even if cached")
+    p.add_argument("--no-html", action="store_true", help="PDFs only (leave out HTML)")
 
     @with_argparser(workspace_parser)
     @with_category("Workspaces")
@@ -514,7 +515,10 @@ class KitelonShell(Cmd):
 
             if args.ws_cmd == "reports":
                 out_path = export_reports_bundle(
-                    args.alias, output=args.output, force=args.force
+                    args.alias,
+                    output=args.output,
+                    force=args.force,
+                    include_html=not args.no_html,
                 )
                 return self._success(f"Wrote report bundle to {out_path}")
         except CliError as exc:

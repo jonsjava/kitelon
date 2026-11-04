@@ -2,6 +2,13 @@
 
 All notable changes to Kitelon are documented here.
 
+## [0.5.2] - 2026-11-04
+
+### Reports
+- The all-reports ZIP now includes the HTML version of every report alongside its PDF (`kitelon-report.html`/`.pdf`, `pentest-report.*`, `ssl-report.*`, `ssl-<host>-<port>.*`). Opt out with `--pdf-only` (bash), `--no-html` (kitelon-cli and `bin/kitelon_report_bundle.py`), or `?html=false` (API).
+- If PDF rendering is unavailable (no `pdfkit`/`wkhtmltopdf`), the ZIP still exports with the HTML versions and a `MISSING-PDFS.txt` listing what couldn't be rendered, instead of failing.
+- Web UI button renamed to **Reports (ZIP)**.
+
 ## [0.5.1] - 2026-11-03
 
 ### CI / Docker
