@@ -3,6 +3,12 @@ name: docker-publish
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Image version tag (e.g. v0.5.1). Leave blank to use v + the VERSION file."
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -33,6 +39,23 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      - name: Set image tag
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            tag="$GITHUB_REF_NAME"
+          elif [[ -n "$INPUT_VERSION" ]]; then
+            tag="$INPUT_VERSION"
+          else
+            tag="v$(tr -d '[:space:]' < VERSION)"
+          fi
+          if [[ ! "$tag" =~ ^v[0-9A-Za-z._-]+$ ]]; then
+            echo "::error::Invalid image tag '$tag' (expected v<version>)"; exit 1
+          fi
+          echo "IMAGE_TAG=$tag" >> "$GITHUB_ENV"
+          echo "Image tag: $tag"
+
       - name: Free runner disk space
         run: |
           df -h /
@@ -59,14 +82,14 @@ jobs:
           load: true
           tags: |
             jonsjava/kitelon:latest
-            jonsjava/kitelon:${{ github.ref_name }}
+            jonsjava/kitelon:${{ env.IMAGE_TAG }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Scan image with Trivy
         uses: aquasecurity/trivy-action@v0.36.0
         with:
-          image-ref: jonsjava/kitelon:${{ github.ref_name }}
+          image-ref: jonsjava/kitelon:${{ env.IMAGE_TAG }}
           format: table
           exit-code: 1
           severity: CRITICAL,HIGH
@@ -75,4 +98,4 @@ jobs:
       - name: Push image
         run: |
           docker push jonsjava/kitelon:latest
-          docker push jonsjava/kitelon:${{ github.ref_name }}
+          docker push jonsjava/kitelon:${{ env.IMAGE_TAG }}

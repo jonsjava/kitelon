@@ -6,6 +6,7 @@ All notable changes to Kitelon are documented here.
 
 ### CI / Docker
 - Fix `docker-publish` failing with "no space left on device" during the image build. `docker-publish` and `docker-weekly` now free ~25-30 GB of preinstalled runner toolchains (.NET, Android, GHC, CodeQL, ...) before building.
+- `docker-publish`: add `workflow_dispatch` for manual runs. The image tag is the optional `version` input, else `v` + `VERSION`; tag pushes still use the tag name.
 - Dockerfile: clear Go module/build caches, pip/apt caches and `/tmp` in the `install.sh` layer so they are not shipped in the image.
 
 ## [0.5.0] - 2026-11-03
