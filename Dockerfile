@@ -24,8 +24,13 @@ COPY docker/kitelon.conf /build/kitelon.conf
 COPY . /build/
 
 WORKDIR /build
+# Drop build-only caches in the same layer so they never land in the image
+# (Go module/build caches and pip/apt caches add several GB otherwise).
 RUN useradd --create-home --shell /bin/bash kitelon \
-    && bash install.sh force -y
+    && bash install.sh force -y \
+    && (command -v go >/dev/null && go clean -cache -modcache || true) \
+    && rm -rf /root/go/pkg /root/.cache /home/kitelon/.cache \
+              /var/lib/apt/lists/* /var/cache/apt/archives/*.deb /tmp/*
 
 COPY docker/entrypoint.sh /usr/local/bin/kitelon-entrypoint.sh
 RUN chmod 755 /usr/local/bin/kitelon-entrypoint.sh \
