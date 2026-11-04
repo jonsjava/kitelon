@@ -2,7 +2,13 @@
 
 All notable changes to Kitelon are documented here.
 
-## [Unreleased]
+## [0.5.0] - 2026-11-03
+
+### Reports
+- All-reports PDF bundle: render the scan report, pentest workbook, SSL/TLS index, and each per-host SSL/TLS report to PDF and pack them into one ZIP. Available from every surface: **Reports PDF (ZIP)** button on the workspace page, `GET /api/v1/workspaces/<alias>/reports.zip`, `kitelon -w <alias> --reports-zip [--output PATH]` (bash), `workspace reports <alias> [-o OUT] [--force]` (kitelon-cli), and `bin/kitelon_report_bundle.py`. Reports that are unavailable (e.g. no SSL data) are skipped; a missing PDF toolchain returns 503.
+
+### Scanning
+- `full-audit` now runs an SSL/TLS (testssl + tlsx) check on every recon-discovered host with port 443 open, not just the apex target. Added a reusable `ssl_stack` pipeline step.
 
 ### Install / Docker
 - Bump Go toolchain to 1.27.3 (pinned tarball SHA256 updated) for CVE-2026-111943, CVE-2026-78667, CVE-2026-78669, and CVE-2026-97031 in Go stdlib.

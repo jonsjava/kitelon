@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from kitelon_db import (
+    confined_workspace_loot_path,
     create_schedule,
     create_workspace,
     db_config,
@@ -27,14 +28,13 @@ from kitelon_db import (
     delete_schedule,
     delete_workspace,
     enqueue_job,
-    confined_workspace_loot_path,
     ensure_workspace,
     get_connection,
     get_heartbeat,
-    get_host,
     get_job,
     get_schedule,
     get_workspace_by_alias,
+    is_workspace_loot_dir,
     list_discovered_urls,
     list_domains,
     list_hosts,
@@ -48,7 +48,6 @@ from kitelon_db import (
     rename_host,
     retry_job,
     sync_workspaces_from_disk,
-    is_workspace_loot_dir,
     update_job,
     update_schedule,
     update_workspace,
@@ -85,10 +84,10 @@ def _package_version() -> str:
     return "0.0.0"
 
 try:
+    import uvicorn
     from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, UploadFile
     from fastapi.responses import FileResponse, JSONResponse, Response
     from fastapi.staticfiles import StaticFiles
-    import uvicorn
 except ImportError:
     FastAPI = None  # type: ignore
     UploadFile = None  # type: ignore
@@ -216,8 +215,8 @@ def _parse_hosts_list(hosts: list[str] | None) -> list[str] | None:
 
 
 def _report_rel_paths(loot_path: Path, host_filter: list[str] | None) -> tuple[str, str]:
-    from kitelon_loot import subset_report_paths  # noqa: E402
-    from kitelon_storage import normalize_rel_path  # noqa: E402
+    from kitelon_loot import subset_report_paths
+    from kitelon_storage import normalize_rel_path
 
     if host_filter:
         html_path, pdf_path = subset_report_paths(loot_path, host_filter)
@@ -249,7 +248,7 @@ def create_app() -> FastAPI:
 
     app = FastAPI(title="Kitelon API", version=_package_version())
 
-    from kitelon_log import get_logger  # noqa: E402
+    from kitelon_log import get_logger
 
     api_logger = get_logger("api")
 
@@ -376,7 +375,7 @@ def create_app() -> FastAPI:
         alias: str,
         _: None = Depends(require_api_key),
     ) -> Response:
-        from kitelon_workspace_pack import export_workspace_zip  # noqa: E402
+        from kitelon_workspace_pack import export_workspace_zip
 
         try:
             out = export_workspace_zip(alias, loot_root=LOOT_ROOT)
@@ -401,7 +400,7 @@ def create_app() -> FastAPI:
         replace: bool = Query(False),
         _: None = Depends(require_api_key),
     ) -> dict[str, Any]:
-        from kitelon_workspace_pack import import_workspace_zip  # noqa: E402
+        from kitelon_workspace_pack import import_workspace_zip
 
         content = await file.read()
         if len(content) > MAX_PACK_BYTES:
@@ -448,7 +447,7 @@ def create_app() -> FastAPI:
     async def _import_scanner_file(
         alias: str, scanner: str, file: UploadFile
     ) -> dict[str, Any]:
-        from kitelon_import import import_scanner_file  # noqa: E402
+        from kitelon_import import import_scanner_file
 
         ws = _workspace_or_404(alias)
         content = await file.read()
@@ -498,14 +497,14 @@ def create_app() -> FastAPI:
         hosts: list[str] | None = Query(None),
         _: None = Depends(require_api_key),
     ) -> Response:
-        from kitelon_loot import generate_reports  # noqa: E402
-        from kitelon_storage import (  # noqa: E402
+        from kitelon_loot import generate_reports
+        from kitelon_storage import (
             artifacts_enabled,
             fs_mirror_enabled,
             get_artifact_bytes,
             store_artifact,
         )
-        from report import (  # noqa: E402
+        from report import (
             ReportError,
             ReportNotFoundError,
             ReportToolError,
@@ -587,9 +586,13 @@ def create_app() -> FastAPI:
         payload: dict[str, Any],
         _: None = Depends(require_api_key),
     ) -> dict[str, Any]:
-        from kitelon_loot import generate_reports  # noqa: E402
-        from kitelon_storage import artifacts_enabled, get_artifact_bytes, store_artifact  # noqa: E402
-        from report import export_pdf_bytes  # noqa: E402
+        from kitelon_loot import generate_reports
+        from kitelon_storage import (
+            artifacts_enabled,
+            get_artifact_bytes,
+            store_artifact,
+        )
+        from report import export_pdf_bytes
 
         host_filter = payload.get("hosts") or []
         if not isinstance(host_filter, list) or not host_filter:
@@ -638,7 +641,7 @@ def create_app() -> FastAPI:
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
         except Exception as exc:
-            from report import ReportError  # noqa: E402
+            from report import ReportError
 
             if isinstance(exc, ReportError):
                 raise HTTPException(503, str(exc)) from exc
@@ -649,7 +652,7 @@ def create_app() -> FastAPI:
         alias: str,
         _: None = Depends(require_api_key),
     ) -> list[dict[str, Any]]:
-        from kitelon_testssl import list_ssl_scan_summaries  # noqa: E402
+        from kitelon_testssl import list_ssl_scan_summaries
 
         with get_connection() as conn:
             ws = _workspace_or_404(alias, conn)
@@ -671,7 +674,7 @@ def create_app() -> FastAPI:
         alias: str,
         _: None = Depends(require_api_key),
     ) -> Response:
-        from kitelon_testssl import get_ssl_report_html  # noqa: E402
+        from kitelon_testssl import get_ssl_report_html
 
         with get_connection() as conn:
             ws = _workspace_or_404(alias, conn)
@@ -692,7 +695,7 @@ def create_app() -> FastAPI:
         port: int = Query(443, ge=1, le=65535),
         _: None = Depends(require_api_key),
     ) -> Response:
-        from kitelon_testssl import get_ssl_report_html  # noqa: E402
+        from kitelon_testssl import get_ssl_report_html
 
         with get_connection() as conn:
             ws = _workspace_or_404(alias, conn)
@@ -717,8 +720,8 @@ def create_app() -> FastAPI:
         force: bool = Query(False),
         _: None = Depends(require_api_key),
     ) -> Response:
-        from kitelon_testssl import get_ssl_report_pdf_bytes  # noqa: E402
-        from report import ReportError, ReportNotFoundError, ReportToolError  # noqa: E402
+        from kitelon_testssl import get_ssl_report_pdf_bytes
+        from report import ReportError, ReportNotFoundError, ReportToolError
 
         with get_connection() as conn:
             ws = _workspace_or_404(alias, conn)
@@ -748,8 +751,8 @@ def create_app() -> FastAPI:
         force: bool = Query(False),
         _: None = Depends(require_api_key),
     ) -> Response:
-        from kitelon_testssl import get_ssl_report_pdf_bytes  # noqa: E402
-        from report import ReportError, ReportNotFoundError, ReportToolError  # noqa: E402
+        from kitelon_testssl import get_ssl_report_pdf_bytes
+        from report import ReportError, ReportNotFoundError, ReportToolError
 
         with get_connection() as conn:
             ws = _workspace_or_404(alias, conn)
@@ -778,7 +781,7 @@ def create_app() -> FastAPI:
         alias: str,
         _: None = Depends(require_api_key),
     ) -> Response:
-        from kitelon_pentest_report import get_pentest_report_html  # noqa: E402
+        from kitelon_pentest_report import get_pentest_report_html
 
         with get_connection() as conn:
             ws = _workspace_or_404(alias, conn)
@@ -790,6 +793,37 @@ def create_app() -> FastAPI:
             )
         return Response(content=html, media_type="text/html; charset=utf-8")
 
+    @app.get("/api/v1/workspaces/{alias}/reports.zip")
+    def workspace_reports_zip(
+        alias: str,
+        force: bool = Query(False),
+        _: None = Depends(require_api_key),
+    ) -> Response:
+        from kitelon_report_bundle import export_reports_zip_bytes
+        from report import ReportError, ReportToolError
+
+        with get_connection() as conn:
+            ws = _workspace_or_404(alias, conn)
+            try:
+                data, filename = export_reports_zip_bytes(
+                    conn,
+                    int(ws["id"]),
+                    Path(ws["loot_path"]),
+                    alias,
+                    force=force,
+                )
+            except FileNotFoundError as exc:
+                raise HTTPException(404, str(exc)) from exc
+            except ReportToolError as exc:
+                raise HTTPException(503, str(exc)) from exc
+            except ReportError as exc:
+                raise HTTPException(500, str(exc)) from exc
+        return Response(
+            content=data,
+            media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
     @app.get("/api/v1/workspaces/{alias}/artifacts")
     def workspace_artifacts(
         alias: str,
@@ -798,7 +832,7 @@ def create_app() -> FastAPI:
         offset: int = Query(0, ge=0),
         _: None = Depends(require_api_key),
     ) -> list[dict[str, Any]]:
-        from kitelon_storage import list_artifacts  # noqa: E402
+        from kitelon_storage import list_artifacts
 
         with get_connection() as conn:
             ws = _workspace_or_404(alias, conn)
@@ -813,7 +847,7 @@ def create_app() -> FastAPI:
         rel_path: str,
         _: None = Depends(require_api_key),
     ) -> Response:
-        from kitelon_storage import get_artifact, normalize_rel_path  # noqa: E402
+        from kitelon_storage import get_artifact, normalize_rel_path
 
         try:
             rel = normalize_rel_path(rel_path)
@@ -1192,7 +1226,7 @@ def main() -> None:
         print("fastapi/uvicorn not installed", file=sys.stderr)
         sys.exit(1)
     verify_api_startup()
-    from kitelon_log import get_logger  # noqa: E402
+    from kitelon_log import get_logger
 
     get_logger("api").info("starting web UI bind=%s port=%s", WEB_BIND, WEB_PORT)
     app = create_app()

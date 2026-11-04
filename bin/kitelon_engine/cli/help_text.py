@@ -34,6 +34,8 @@ Subcommands:
                                Rename a host inside a workspace
   delete <ALIAS> [--delete-loot]
                                Delete workspace row (optional loot removal)
+  reports <ALIAS> [-o OUT] [--force]
+                               Render all reports (scan, pentest, SSL/TLS) to PDF and pack them into one ZIP
 
 Examples:
   workspace list
@@ -41,6 +43,7 @@ Examples:
   workspace create demo
   workspace update demo --rename demo-prod
   workspace delete demo --delete-loot
+  workspace reports nmap-test
 
 Tip: append help after any subcommand for detailed usage, e.g. workspace show help
 """,
@@ -165,6 +168,28 @@ Usage:
 Examples:
   workspace delete demo
   workspace delete demo --delete-loot
+""",
+        )
+    elif sub == "reports":
+        _out(
+            shell,
+            """
+workspace reports: export all reports to a ZIP of PDFs
+
+Usage:
+  workspace reports <ALIAS> [-o OUT] [--force]
+
+Renders the scan report, pentest workbook, SSL/TLS index, and each per-host
+SSL/TLS report to PDF and packs them into one ZIP. Reports with no data are
+skipped. Defaults to writing into the workspace reports/ directory.
+
+Options:
+  -o, --output OUT   Write the ZIP to OUT instead of the default location
+  --force            Re-render PDFs even if a cached copy exists
+
+Examples:
+  workspace reports nmap-test
+  workspace reports nmap-test -o /tmp/nmap-test-reports.zip
 """,
         )
     else:

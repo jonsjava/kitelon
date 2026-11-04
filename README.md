@@ -220,7 +220,8 @@ PostgreSQL (`kitelon` database) holds hosts, findings, jobs, schedules, and opti
 - HTML workspace report at `kitelon-report.html`
 - Subset PDF/HTML for selected hosts (Web UI checkboxes or `?hosts=` query params)
 - CSV host table at `reports/host-table-report.csv`
-- SSL/TLS via testssl.sh (`TESTSSL=1` or `--testssl`); reports in the Web UI
+- SSL/TLS via testssl.sh (`TESTSSL=1` or `--testssl`); reports in the Web UI. The `full-audit` mode runs testssl on every discovered HTTPS host, not just the apex target.
+- All reports (scan, pentest workbook, SSL/TLS index and per-host) rendered to PDF and packed into one ZIP: **Reports PDF (ZIP)** on the workspace page, `GET /api/v1/workspaces/<alias>/reports.zip`, `sudo kitelon -w <alias> --reports-zip`, `kitelon-cli -c 'workspace reports <alias>'`, or `python3 bin/kitelon_report_bundle.py --loot-dir <dir> --workspace <alias>`
 - Rebuild: `sudo kitelon -w <alias> --reimport`
 - Active scan check: `sudo kitelon --is-running`; stop with `sudo kitelon --stop`
 
@@ -305,6 +306,8 @@ CLI equivalents: `kitelon workspaces list|show|create|update|delete` and `kitelo
 
 **Schedules:** `GET/POST /api/v1/schedules`, `GET/PATCH/DELETE /api/v1/schedules/{id}`: Web UI at `/schedules.html`.
 
+**Reports:** `GET /api/v1/workspaces/{alias}/report.pdf` (scan report), `.../ssl-report.pdf`, `.../pentest-report.html`, and `GET /api/v1/workspaces/{alias}/reports.zip` which renders every report (scan, pentest workbook, SSL/TLS index and per-host) to PDF and returns one ZIP (`?force=true` to re-render).
+
 **Scanner imports:** `POST /api/v1/workspaces/{alias}/import/nessus` and `.../import/burp` (multipart file upload).
 
 **Scan config:** `GET /api/v1/scan-config`: pass `options` when creating jobs or schedules (`resume`, `osint`, `recon`, `fullportscan`, `port`).
@@ -314,7 +317,13 @@ CLI equivalents: `kitelon workspaces list|show|create|update|delete` and `kitelo
 Optional PDF export (installed by `install.sh` as `pdfkit` + `wkhtmltopdf`):
 
 ```bash
+# Single scan report -> PDF
 python3 /usr/share/kitelon/bin/report.py --loot-dir /usr/share/kitelon/loot/workspace/myscope
+
+# All reports (scan + pentest + SSL/TLS) -> PDFs -> one ZIP
+sudo kitelon -w myscope --reports-zip
+kitelon-cli -c 'workspace reports myscope'
+python3 /usr/share/kitelon/bin/kitelon_report_bundle.py --loot-dir /usr/share/kitelon/loot/workspace/myscope --workspace myscope
 ```
 
 ## Hooks

@@ -44,7 +44,7 @@ loot/workspace/<alias>/
 | `batch-webdeep` | `batch.batch_webdeep` | Deep web scan from target file |
 | `batch-vuln` | `batch.batch_vuln` | Vuln scan from target file |
 | `batch-ports-fast` | `batch_fast.run` | Fast multi-target port scan from file |
-| `full-audit` | `full_audit.run` | OSINT + recon + web-deep + vuln |
+| `full-audit` | `full_audit.run` | OSINT + recon + web-deep + vuln, plus an SSL/TLS (testssl + tlsx) sweep over every discovered host with 443 open, not just the apex |
 
 ## Options
 

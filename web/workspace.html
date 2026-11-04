@@ -14,6 +14,7 @@
       <div class="toolbar-actions">
         <button type="button" id="pentest-report-btn" class="secondary">Pentest Workbook ↗</button>
         <button type="button" id="export-zip-btn" class="secondary">Export ZIP</button>
+        <button type="button" id="reports-zip-btn" class="secondary">Reports PDF (ZIP)</button>
         <button type="button" id="rename-btn" class="secondary">Rename</button>
         <button type="button" id="pdf-btn" class="secondary">Download PDF (all)</button>
         <button type="button" id="pdf-subset-btn" class="secondary">Report selected</button>
@@ -611,6 +612,26 @@
         );
       } catch (e) {
         document.getElementById("error").textContent = e.message;
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    document.getElementById("reports-zip-btn").addEventListener("click", async () => {
+      if (!alias) return;
+      const btn = document.getElementById("reports-zip-btn");
+      const msg = document.getElementById("pdf-msg");
+      btn.disabled = true;
+      if (msg) msg.textContent = "Rendering report PDFs…";
+      try {
+        await download(
+          "/api/v1/workspaces/" + encodeURIComponent(alias) + "/reports.zip",
+          "kitelon-" + alias + "-reports.zip"
+        );
+        if (msg) msg.textContent = "";
+      } catch (e) {
+        document.getElementById("error").textContent = e.message;
+        if (msg) msg.textContent = "";
       } finally {
         btn.disabled = false;
       }

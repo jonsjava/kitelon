@@ -31,6 +31,7 @@ context                  # show workspace + last job id
 |---------|---------|
 | `scan -t TARGET [-w WS] [-m MODE] [opts] [--sync] [--wait]` | Queue or run scan (`--sync` = foreground) |
 | `workspace list\|show\|create\|update\|delete\|rename-host` | Workspace CRUD |
+| `workspace reports <ALIAS> [-o OUT] [--force]` | Render all reports (scan, pentest, SSL/TLS) to PDF and pack them into one ZIP |
 | `workspace show ssl [HOST] [--open]` | testssl summaries / open HTML report |
 | `workspace show services\|tech\|urls\|scan-runs` | Enriched DB views after loot import |
 | `jobs list\|show\|create\|update\|delete\|retry\|wait` | Job queue |
