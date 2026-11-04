@@ -2,8 +2,6 @@
 
 All notable changes to Kitelon are documented here.
 
-## [Unreleased]
-
 ## [0.5.0] - 2026-11-03
 
 ### Reports
