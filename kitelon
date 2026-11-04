@@ -147,6 +147,11 @@ $star SCAN CONTROL
  kitelon --stop
  kitelon -t <TARGET> -w <WORKSPACE> -rr
 
+$star REPORTS
+ kitelon -w <WORKSPACE> --reports-zip
+ kitelon -w <WORKSPACE> --reports-zip --output /tmp/reports.zip
+   (renders all reports — scan, pentest, SSL/TLS — to PDF and packs them into one ZIP)
+
 $star ADMIN
  kitelon -w <WORKSPACE> --export
  kitelon --import-zip /path/to/workspace.zip
@@ -193,6 +198,9 @@ kitelon_cmd_is_meta() {
       return 0
       ;;
     *"--reload"*|*"--export"*|*"--update"*|*" --update"*)
+      return 0
+      ;;
+    *"--reports-zip"*|*"--reports-pdf"*)
       return 0
       ;;
     *" -h"|*" -u"|*" -d"|*" --delete"*|*" -dh"*|*" -dt"*)
@@ -592,6 +600,15 @@ case $key in
     shift
     shift
     ;;
+    --reports-zip|--reports-pdf)
+    REPORTS_ZIP="1"
+    shift
+    ;;
+    --output)
+    EXPORT_OUTPUT="$2"
+    shift
+    shift
+    ;;
     --replace)
     IMPORT_REPLACE="1"
     shift
@@ -839,6 +856,22 @@ if [[ "$REIMPORT" = "1" ]]; then
     loot
     exit
   fi
+fi
+
+if [[ "$REPORTS_ZIP" = "1" ]]; then
+  if [[ -z "$WORKSPACE" ]]; then
+    echo -e "$KL_C_ERR[!]$KL_RESET --reports-zip requires -w <WORKSPACE>"
+    exit 1
+  fi
+  LOOT_DIR="${WORKSPACE_DIR:-$INSTALL_DIR/loot/workspace/$WORKSPACE}"
+  export PYTHONPATH="$INSTALL_DIR/bin${PYTHONPATH:+:$PYTHONPATH}"
+  kitelon_export_db_env
+  BUNDLE_ARGS=(--loot-dir "$LOOT_DIR" --workspace "$WORKSPACE")
+  [[ -n "$EXPORT_OUTPUT" ]] && BUNDLE_ARGS+=(--output "$EXPORT_OUTPUT")
+  [[ -n "$TESTSSL_FORCE" ]] && BUNDLE_ARGS+=(--force)
+  python3 "$INSTALL_DIR/bin/kitelon_report_bundle.py" "${BUNDLE_ARGS[@]}" || exit 1
+  echo -e "$KL_C_OK[✓]$KL_RESET report PDF bundle saved for workspace $WORKSPACE"
+  exit 0
 fi
 
 if [[ "$TESTSSL_ONLY" = "1" ]]; then

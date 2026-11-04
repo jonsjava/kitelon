@@ -74,6 +74,7 @@ from kitelon_engine.cli.services import (
     create_scan_schedule,
     enqueue_scan,
     ensure_workspace_id,
+    export_reports_bundle,
     format_ssl_findings_summary,
     get_workspace_ssl_scan,
     list_workspace_ssl_scans,
@@ -448,6 +449,11 @@ class KitelonShell(Cmd):
     p.add_argument("alias")
     p.add_argument("--delete-loot", action="store_true")
 
+    p = ws_sub.add_parser("reports")
+    p.add_argument("alias")
+    p.add_argument("-o", "--output", help="Output ZIP path (default: loot reports/ dir)")
+    p.add_argument("--force", action="store_true", help="Re-render PDFs even if cached")
+
     @with_argparser(workspace_parser)
     @with_category("Workspaces")
     def do_workspace(self, args: argparse.Namespace) -> bool:
@@ -505,6 +511,12 @@ class KitelonShell(Cmd):
                 if args.delete_loot:
                     msg += " (loot removed)"
                 return self._success(msg)
+
+            if args.ws_cmd == "reports":
+                out_path = export_reports_bundle(
+                    args.alias, output=args.output, force=args.force
+                )
+                return self._success(f"Wrote report bundle to {out_path}")
         except CliError as exc:
             return self._failure(str(exc))
         except ValueError as exc:

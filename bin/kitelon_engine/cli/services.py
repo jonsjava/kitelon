@@ -197,6 +197,43 @@ def run_db_import(alias: str, *, action: str = "all") -> str:
     return f"imported loot and regenerated reports for workspace {alias}"
 
 
+def export_reports_bundle(
+    alias: str,
+    *,
+    output: str | Path | None = None,
+    force: bool = False,
+) -> Path:
+    """Render every report for a workspace to PDF and pack them into a ZIP.
+
+    Returns the path of the written ZIP.
+    """
+    from kitelon_report_bundle import export_reports_zip_bytes
+
+    loot_dir = get_workspace_loot_path(alias)
+    if not loot_dir.is_dir():
+        raise CliError(f"loot directory not found: {loot_dir}")
+
+    with get_connection() as conn:
+        workspace_id = ensure_workspace_id(conn, alias)
+        try:
+            data, default_name = export_reports_zip_bytes(
+                conn, workspace_id, loot_dir, alias, force=force
+            )
+        except FileNotFoundError as exc:
+            raise CliError(str(exc)) from exc
+        except Exception as exc:  # ReportError and friends
+            from report import ReportError
+
+            if isinstance(exc, ReportError):
+                raise CliError(str(exc)) from exc
+            raise
+
+    out_path = Path(output) if output else loot_dir / "reports" / default_name
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_bytes(data)
+    return out_path
+
+
 def run_db_command(cmd: str, *, loot_root: Path | None = None) -> str:
     root = loot_root or LOOT_ROOT
     if cmd == "migrate":

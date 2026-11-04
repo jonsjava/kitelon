@@ -1,9 +1,9 @@
 """Shared pipeline steps."""
 
+import json
+from collections.abc import Callable
 from functools import partial
 from pathlib import Path
-from collections.abc import Callable
-import json
 
 from kitelon_engine.artifacts import Manifest
 from kitelon_engine.checks.headers import check_headers
@@ -111,6 +111,33 @@ def web_stack(ctx: ScanContext, manifest: Manifest, host: str, ports: list[int] 
 
         ffuf_out = manifest.artifact_path("tools", "ffuf", f"{host}-{port}.json")
         run(_opt(ctx, "enable_ffuf") and _url_live(httpx_out), f"ffuf-{host}-{port}", ffuf_out, partial(ffuf.run_ffuf, ctx, url, wordlist, ffuf_out))
+
+
+def ssl_stack(ctx: ScanContext, manifest: Manifest, host: str, port: int = 443) -> None:
+    """Run SSL/TLS checks (testssl + tlsx) for a single host:port.
+
+    Mirrors the TLS steps inside ``web_stack`` so modes that do not run the
+    full web stack on every host (e.g. full-audit across recon-discovered
+    hosts) can still cover SSL/TLS. Step ids match ``web_stack`` so results
+    dedupe and the loot lands in the same ``ssl/`` artifact layout.
+    """
+    ssl_out = manifest.artifact_path("ssl", f"{host}-{port}.json")
+    if _opt(ctx, "enable_testssl"):
+        _run_step(
+            manifest,
+            f"testssl-{host}-{port}",
+            ssl_out,
+            partial(testssl.run_testssl, ctx, host, port, ssl_out),
+        )
+
+    tlsx_out = manifest.artifact_path("ssl", f"{host}-{port}-tlsx.json")
+    if _opt(ctx, "enable_tlsx"):
+        _run_step(
+            manifest,
+            f"tlsx-{host}-{port}",
+            tlsx_out,
+            partial(tlsx.probe_tls, ctx, host, port, tlsx_out),
+        )
 
 
 def service_stack(ctx: ScanContext, manifest: Manifest, host: str, ports: list[int]) -> None:
