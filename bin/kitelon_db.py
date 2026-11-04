@@ -1157,12 +1157,20 @@ def claim_next_job(
             return None
     conn.execute(
         """
-        UPDATE jobs SET status = 'running', started_at = NOW(), pid = NULL
+        UPDATE jobs SET status = 'running', started_at = NOW(), heartbeat_at = NOW(),
+            attempts = COALESCE(attempts, 0) + 1, pid = NULL
         WHERE id = %s
         """,
         (row["id"],),
     )
     return dict(row)
+
+
+def touch_job_heartbeat(conn: Any, job_id: int) -> None:
+    conn.execute(
+        "UPDATE jobs SET heartbeat_at = NOW() WHERE id = %s AND status = 'running'",
+        (job_id,),
+    )
 
 
 def complete_job(conn: Any, job_id: int, exit_code: int = 0, error: str | None = None) -> None:
@@ -1221,7 +1229,7 @@ def retry_job(conn: Any, job_id: int, created_by: str = "retry") -> int:
     job = get_job(conn, job_id)
     if not job:
         raise ValueError(f"job not found: {job_id}")
-    if job["status"] in ("pending", "running"):
+    if job["status"] in ("pending", "held", "running"):
         raise ValueError(f"cannot retry job {job_id} while status is {job['status']}")
 
     args = job.get("args_json") or {}
@@ -1335,43 +1343,210 @@ def delete_job(conn: Any, job_id: int, *, kill: bool = False) -> dict[str, Any]:
     return dict(job)
 
 
-def recover_stuck_jobs(conn: Any, max_age_minutes: int = 180) -> int:
-    result = conn.execute(
+QUEUE_PAUSED_KEY = "queue_paused"
+PAUSE_FILE = Path(os.environ.get("KITELON_PAUSE_FILE", "/var/lib/kitelon/paused"))
+DEFAULT_MAX_ATTEMPTS = 3
+
+
+def _pid_alive(pid: Any) -> bool:
+    if not pid:
+        return False
+    try:
+        os.kill(int(pid), 0)
+    except ProcessLookupError:
+        return False
+    except (PermissionError, TypeError, ValueError, OSError):
+        return False
+    return True
+
+
+def _terminate_process_group(pid: Any) -> None:
+    try:
+        os.killpg(int(pid), signal.SIGTERM)
+    except (ProcessLookupError, PermissionError, OSError, TypeError, ValueError):
+        try:
+            os.kill(int(pid), signal.SIGTERM)
+        except (ProcessLookupError, PermissionError, OSError, TypeError, ValueError):
+            pass
+
+
+def _settings_table_exists(conn: Any) -> bool:
+    row = conn.execute("SELECT to_regclass('kitelon_settings') AS t").fetchone()
+    return bool(row and row.get("t"))
+
+
+def queue_paused(conn: Any) -> bool:
+    """True when the queue is paused (DB flag or pause file)."""
+    if PAUSE_FILE.exists():
+        return True
+    if not _settings_table_exists(conn):
+        return False
+    row = conn.execute(
+        "SELECT value FROM kitelon_settings WHERE key = %s", (QUEUE_PAUSED_KEY,)
+    ).fetchone()
+    return bool(row and row.get("value") == "1")
+
+
+def set_queue_paused(conn: Any, paused: bool, *, hold_pending: bool = True) -> int:
+    """Set the DB pause flag. Returns the number of jobs held or released.
+
+    Pausing also moves ``pending`` jobs to ``held`` so workers older than the
+    pause flag (which only claim ``pending``) cannot pick them up mid-upgrade.
+    """
+    conn.execute(
         """
-        SELECT id, pid FROM jobs
-        WHERE status = 'running'
-          AND started_at < NOW() - (%s || ' minutes')::interval
+        CREATE TABLE IF NOT EXISTS kitelon_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO kitelon_settings (key, value, updated_at) VALUES (%s, %s, NOW())
+        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
         """,
-        (str(max_age_minutes),),
+        (QUEUE_PAUSED_KEY, "1" if paused else "0"),
+    )
+    if paused and hold_pending:
+        cur = conn.execute("UPDATE jobs SET status = 'held' WHERE status = 'pending'")
+        return cur.rowcount or 0
+    if not paused:
+        cur = conn.execute("UPDATE jobs SET status = 'pending' WHERE status = 'held'")
+        return cur.rowcount or 0
+    return 0
+
+
+def list_running_jobs(conn: Any) -> list[dict[str, Any]]:
+    has_heartbeat = conn.execute(
+        """
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'jobs' AND column_name = 'heartbeat_at'
+        """
+    ).fetchone()
+    beat = "j.heartbeat_at" if has_heartbeat else "NULL::timestamptz"
+    rows = conn.execute(
+        f"""
+        SELECT j.id, j.job_type, j.target, j.mode, j.pid, j.started_at,
+               {beat} AS heartbeat_at, w.alias AS workspace_alias
+        FROM jobs j
+        LEFT JOIN workspaces w ON w.id = j.workspace_id
+        WHERE j.status = 'running'
+        ORDER BY j.started_at NULLS LAST, j.id
+        """
     ).fetchall()
-    recovered = 0
-    for row in result:
-        pid = row.get("pid")
-        if pid:
-            try:
-                os.kill(int(pid), 0)
-            except ProcessLookupError:
-                pid = None
-            except (PermissionError, TypeError, ValueError):
-                pid = None
-            else:
-                try:
-                    os.killpg(int(pid), signal.SIGTERM)
-                except (ProcessLookupError, PermissionError, OSError):
-                    try:
-                        os.kill(int(pid), signal.SIGTERM)
-                    except (ProcessLookupError, PermissionError, OSError):
-                        pass
-                continue
+    return [dict(r) for r in rows]
+
+
+def requeue_job(
+    conn: Any,
+    job_id: int,
+    *,
+    reason: str,
+    max_attempts: int = DEFAULT_MAX_ATTEMPTS,
+    resume: bool = True,
+) -> str:
+    """Put an interrupted running job back in the queue.
+
+    Scan jobs are requeued with ``-rr`` so the manifest skips finished steps.
+    Returns ``requeued``, ``failed`` (retry cap hit) or ``skipped``.
+    """
+    job = conn.execute(
+        """
+        SELECT id, job_type, args_json, COALESCE(attempts, 0) AS attempts
+        FROM jobs WHERE id = %s AND status = 'running'
+        FOR UPDATE
+        """,
+        (job_id,),
+    ).fetchone()
+    if not job:
+        return "skipped"
+
+    attempts = int(job["attempts"])
+    if max_attempts and attempts >= max_attempts:
         conn.execute(
             """
-            UPDATE jobs SET status = 'failed', finished_at = NOW(),
-                error_message = 'recovered: exceeded max runtime', pid = NULL
-            WHERE id = %s AND status = 'running'
+            UPDATE jobs SET status = 'failed', finished_at = NOW(), pid = NULL,
+                error_message = %s
+            WHERE id = %s
             """,
-            (row["id"],),
+            (f"{reason}; gave up after {attempts} attempt(s)", job_id),
         )
-        recovered += 1
+        return "failed"
+
+    args = job.get("args_json") or {}
+    if isinstance(args, str):
+        args = json.loads(args)
+    args = dict(args)
+    if resume and job["job_type"] == "scan":
+        extra = args.get("extra_args") or []
+        if isinstance(extra, str):
+            extra = extra.split()
+        extra = list(extra)
+        if "-rr" not in extra and "--resume" not in extra:
+            extra.append("-rr")
+        args["extra_args"] = extra
+
+    status = "held" if queue_paused(conn) else "pending"
+    conn.execute(
+        """
+        UPDATE jobs SET status = %s, pid = NULL, started_at = NULL,
+            heartbeat_at = NULL, scheduled_at = NOW(), args_json = %s::jsonb,
+            error_message = %s
+        WHERE id = %s
+        """,
+        (
+            status,
+            json.dumps(args),
+            f"{reason}; requeued (attempt {attempts} of {max_attempts})",
+            job_id,
+        ),
+    )
+    return "requeued"
+
+
+def recover_stuck_jobs(
+    conn: Any,
+    stale_minutes: int = 10,
+    *,
+    grace_seconds: int = 120,
+    max_attempts: int = DEFAULT_MAX_ATTEMPTS,
+) -> int:
+    """Requeue running jobs whose worker is gone.
+
+    A job is orphaned when its heartbeat (or start time, for jobs claimed by an
+    older worker) is older than ``stale_minutes``, or when its process is dead
+    and the heartbeat is older than ``grace_seconds``. A job that is still
+    heartbeating is never touched, however long it has run.
+    """
+    rows = conn.execute(
+        """
+        SELECT id, pid,
+            COALESCE(heartbeat_at, started_at) < NOW() - make_interval(mins => %s) AS stale,
+            COALESCE(heartbeat_at, started_at) < NOW() - make_interval(secs => %s) AS past_grace
+        FROM jobs
+        WHERE status = 'running'
+        """,
+        (int(stale_minutes), int(grace_seconds)),
+    ).fetchall()
+    recovered = 0
+    for row in rows:
+        pid = row.get("pid")
+        alive = _pid_alive(pid)
+        if row.get("stale"):
+            if alive:
+                # Nobody is heartbeating for this process, so nobody will record
+                # its result: stop it and resume it under a live worker.
+                _terminate_process_group(pid)
+            reason = "worker stopped heartbeating"
+        elif pid and not alive and row.get("past_grace"):
+            reason = "worker process exited"
+        else:
+            continue
+        if requeue_job(conn, int(row["id"]), reason=reason, max_attempts=max_attempts) != "skipped":
+            recovered += 1
     return recovered
 
 
@@ -1663,7 +1838,7 @@ def prune_invalid_workspaces(
             active = conn.execute(
                 """
                 SELECT 1 FROM jobs
-                WHERE workspace_id = %s AND status IN ('pending', 'running')
+                WHERE workspace_id = %s AND status IN ('pending', 'held', 'running')
                 LIMIT 1
                 """,
                 (row["id"],),

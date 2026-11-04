@@ -22,7 +22,7 @@ CRON_EXAMPLES = (
     "*/15 * * * *",
 )
 
-JOB_STATUSES = ("pending", "running", "completed", "failed", "cancelled")
+JOB_STATUSES = ("pending", "held", "running", "completed", "failed", "cancelled")
 
 PRESET_DESCRIPTIONS: dict[str, str] = {
     "osint-conservative": "Stock OSINT/recon limits; metagoofil off",
@@ -177,6 +177,7 @@ def port_choices_provider(cmd_app, arg_tokens=None) -> Choices:
 def job_status_choices_provider(cmd_app, arg_tokens=None) -> Choices:
     labels = {
         "pending": "Queued, not started",
+        "held": "Queued, paused for an upgrade",
         "running": "Worker is executing",
         "completed": "Finished successfully",
         "failed": "Finished with error",
