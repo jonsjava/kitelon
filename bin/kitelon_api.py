@@ -797,6 +797,7 @@ def create_app() -> FastAPI:
     def workspace_reports_zip(
         alias: str,
         force: bool = Query(False),
+        html: bool = Query(True),
         _: None = Depends(require_api_key),
     ) -> Response:
         from kitelon_report_bundle import export_reports_zip_bytes
@@ -811,6 +812,7 @@ def create_app() -> FastAPI:
                     Path(ws["loot_path"]),
                     alias,
                     force=force,
+                    include_html=html,
                 )
             except FileNotFoundError as exc:
                 raise HTTPException(404, str(exc)) from exc

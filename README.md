@@ -221,7 +221,7 @@ PostgreSQL (`kitelon` database) holds hosts, findings, jobs, schedules, and opti
 - Subset PDF/HTML for selected hosts (Web UI checkboxes or `?hosts=` query params)
 - CSV host table at `reports/host-table-report.csv`
 - SSL/TLS via testssl.sh (`TESTSSL=1` or `--testssl`); reports in the Web UI. The `full-audit` mode runs testssl on every discovered HTTPS host, not just the apex target.
-- All reports (scan, pentest workbook, SSL/TLS index and per-host) rendered to PDF and packed into one ZIP: **Reports PDF (ZIP)** on the workspace page, `GET /api/v1/workspaces/<alias>/reports.zip`, `sudo kitelon -w <alias> --reports-zip`, `kitelon-cli -c 'workspace reports <alias>'`, or `python3 bin/kitelon_report_bundle.py --loot-dir <dir> --workspace <alias>`
+- All reports (scan, pentest workbook, SSL/TLS index and per-host) packed into one ZIP as PDF + HTML (PDF-only: `--pdf-only` / `--no-html` / `?html=false`): **Reports (ZIP)** on the workspace page, `GET /api/v1/workspaces/<alias>/reports.zip`, `sudo kitelon -w <alias> --reports-zip`, `kitelon-cli -c 'workspace reports <alias>'`, or `python3 bin/kitelon_report_bundle.py --loot-dir <dir> --workspace <alias>`
 - Rebuild: `sudo kitelon -w <alias> --reimport`
 - Active scan check: `sudo kitelon --is-running`; stop with `sudo kitelon --stop`
 
@@ -306,7 +306,7 @@ CLI equivalents: `kitelon workspaces list|show|create|update|delete` and `kitelo
 
 **Schedules:** `GET/POST /api/v1/schedules`, `GET/PATCH/DELETE /api/v1/schedules/{id}`: Web UI at `/schedules.html`.
 
-**Reports:** `GET /api/v1/workspaces/{alias}/report.pdf` (scan report), `.../ssl-report.pdf`, `.../pentest-report.html`, and `GET /api/v1/workspaces/{alias}/reports.zip` which renders every report (scan, pentest workbook, SSL/TLS index and per-host) to PDF and returns one ZIP (`?force=true` to re-render).
+**Reports:** `GET /api/v1/workspaces/{alias}/report.pdf` (scan report), `.../ssl-report.pdf`, `.../pentest-report.html`, and `GET /api/v1/workspaces/{alias}/reports.zip` which returns every report (scan, pentest workbook, SSL/TLS index and per-host) as PDF + HTML in one ZIP (`?force=true` to re-render PDFs, `?html=false` for PDFs only).
 
 **Scanner imports:** `POST /api/v1/workspaces/{alias}/import/nessus` and `.../import/burp` (multipart file upload).
 
@@ -320,7 +320,7 @@ Optional PDF export (installed by `install.sh` as `pdfkit` + `wkhtmltopdf`):
 # Single scan report -> PDF
 python3 /usr/share/kitelon/bin/report.py --loot-dir /usr/share/kitelon/loot/workspace/myscope
 
-# All reports (scan + pentest + SSL/TLS) -> PDFs -> one ZIP
+# All reports (scan + pentest + SSL/TLS) -> PDF + HTML -> one ZIP (add --pdf-only / --no-html for PDFs only)
 sudo kitelon -w myscope --reports-zip
 kitelon-cli -c 'workspace reports myscope'
 python3 /usr/share/kitelon/bin/kitelon_report_bundle.py --loot-dir /usr/share/kitelon/loot/workspace/myscope --workspace myscope

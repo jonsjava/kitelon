@@ -34,8 +34,8 @@ Subcommands:
                                Rename a host inside a workspace
   delete <ALIAS> [--delete-loot]
                                Delete workspace row (optional loot removal)
-  reports <ALIAS> [-o OUT] [--force]
-                               Render all reports (scan, pentest, SSL/TLS) to PDF and pack them into one ZIP
+  reports <ALIAS> [-o OUT] [--force] [--no-html]
+                               Pack all reports (scan, pentest, SSL/TLS) into one ZIP as PDF + HTML
 
 Examples:
   workspace list
@@ -174,18 +174,20 @@ Examples:
         _out(
             shell,
             """
-workspace reports: export all reports to a ZIP of PDFs
+workspace reports: export all reports to a ZIP (PDF + HTML)
 
 Usage:
-  workspace reports <ALIAS> [-o OUT] [--force]
+  workspace reports <ALIAS> [-o OUT] [--force] [--no-html]
 
-Renders the scan report, pentest workbook, SSL/TLS index, and each per-host
-SSL/TLS report to PDF and packs them into one ZIP. Reports with no data are
-skipped. Defaults to writing into the workspace reports/ directory.
+Packs the scan report, pentest workbook, SSL/TLS index, and each per-host
+SSL/TLS report into one ZIP, each as a PDF plus its HTML version. Reports with
+no data are skipped. If PDFs can't be rendered, the HTML is still included and
+MISSING-PDFS.txt says why. Defaults to the workspace reports/ directory.
 
 Options:
   -o, --output OUT   Write the ZIP to OUT instead of the default location
   --force            Re-render PDFs even if a cached copy exists
+  --no-html          PDFs only (leave out the HTML versions)
 
 Examples:
   workspace reports nmap-test

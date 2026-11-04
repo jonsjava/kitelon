@@ -22,7 +22,7 @@ def test_export_reports_zip_packs_each_pdf():
         ("ssl-report.pdf", b"%PDF-ssl"),
         ("ssl-host.example-443.pdf", b"%PDF-ssl-host"),
     ]
-    with patch.object(bundle, "collect_report_pdfs", return_value=(pdfs, [])):
+    with patch.object(bundle, "collect_report_files", return_value=(pdfs, [])):
         data, filename = bundle.export_reports_zip_bytes(
             conn=None, workspace_id=1, loot_dir=Path("/tmp/x"), workspace="demo"
         )
@@ -35,7 +35,7 @@ def test_export_reports_zip_packs_each_pdf():
 
 def test_export_reports_zip_raises_tool_error_when_nothing_rendered():
     with patch.object(
-        bundle, "collect_report_pdfs", return_value=([], ["scan report: wkhtmltopdf not found"])
+        bundle, "collect_report_files", return_value=([], ["scan report: wkhtmltopdf not found"])
     ):
         with pytest.raises(ReportToolError):
             bundle.export_reports_zip_bytes(
@@ -44,7 +44,7 @@ def test_export_reports_zip_raises_tool_error_when_nothing_rendered():
 
 
 def test_export_reports_zip_raises_not_found_when_no_reports():
-    with patch.object(bundle, "collect_report_pdfs", return_value=([], [])):
+    with patch.object(bundle, "collect_report_files", return_value=([], [])):
         with pytest.raises(FileNotFoundError):
             bundle.export_reports_zip_bytes(
                 conn=None, workspace_id=1, loot_dir=Path("/tmp/x"), workspace="demo"
@@ -93,3 +93,71 @@ def test_ssl_stack_skips_testssl_when_disabled(tmp_path: Path):
 
     mock_testssl.assert_not_called()
     mock_tlsx.assert_not_called()
+
+
+def _fake_sources(monkeypatch, tmp_path: Path, *, pdf_error: Exception | None = None):
+    """Stub every report source so collect_report_files runs without a DB."""
+    import kitelon_pentest_report
+    import kitelon_testssl
+
+    monkeypatch.setattr(bundle, "artifacts_enabled", lambda: False)
+    monkeypatch.setattr(bundle, "_main_report_html", lambda *a: "<html>scan</html>")
+    monkeypatch.setattr(
+        kitelon_pentest_report, "get_pentest_report_html", lambda *a, **k: "<html>pentest</html>"
+    )
+    monkeypatch.setattr(
+        kitelon_testssl,
+        "list_ssl_scan_summaries",
+        lambda *a: [{"hostname": "a.example", "port": "443"}],
+    )
+    monkeypatch.setattr(
+        kitelon_testssl,
+        "get_ssl_report_html",
+        lambda *a, hostname=None, port=None: f"<html>ssl {hostname or 'index'}</html>",
+    )
+
+    def fake_pdf(html_content, force=True):
+        if pdf_error:
+            raise pdf_error
+        return b"%PDF-" + html_content.encode()
+
+    monkeypatch.setattr(bundle, "export_pdf_bytes", fake_pdf)
+
+
+def test_collect_includes_html_next_to_each_pdf(monkeypatch, tmp_path: Path):
+    _fake_sources(monkeypatch, tmp_path)
+    files, errors = bundle.collect_report_files(
+        None, 1, tmp_path, "demo", regenerate=False
+    )
+    names = sorted(name for name, _ in files)
+    assert errors == []
+    assert names == sorted(
+        [
+            "kitelon-report.html", "kitelon-report.pdf",
+            "pentest-report.html", "pentest-report.pdf",
+            "ssl-report.html", "ssl-report.pdf",
+            "ssl-a.example-443.html", "ssl-a.example-443.pdf",
+        ]
+    )
+    assert dict(files)["pentest-report.html"] == b"<html>pentest</html>"
+
+
+def test_collect_pdf_only_leaves_out_html(monkeypatch, tmp_path: Path):
+    _fake_sources(monkeypatch, tmp_path)
+    files, _ = bundle.collect_report_files(
+        None, 1, tmp_path, "demo", regenerate=False, include_html=False
+    )
+    assert all(name.endswith(".pdf") for name, _ in files)
+    assert len(files) == 4
+
+
+def test_missing_pdf_toolchain_still_bundles_html(monkeypatch, tmp_path: Path):
+    _fake_sources(monkeypatch, tmp_path, pdf_error=ReportToolError("wkhtmltopdf not found"))
+    data, _ = bundle.export_reports_zip_bytes(
+        None, 1, tmp_path, "demo", regenerate=False
+    )
+    with zipfile.ZipFile(io.BytesIO(data)) as zf:
+        names = zf.namelist()
+        assert "kitelon-report.html" in names
+        assert not any(n.endswith(".pdf") for n in names)
+        assert "wkhtmltopdf not found" in zf.read("MISSING-PDFS.txt").decode()

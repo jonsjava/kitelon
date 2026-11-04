@@ -202,8 +202,9 @@ def export_reports_bundle(
     *,
     output: str | Path | None = None,
     force: bool = False,
+    include_html: bool = True,
 ) -> Path:
-    """Render every report for a workspace to PDF and pack them into a ZIP.
+    """Pack every report for a workspace (PDF + HTML) into a ZIP.
 
     Returns the path of the written ZIP.
     """
@@ -217,7 +218,8 @@ def export_reports_bundle(
         workspace_id = ensure_workspace_id(conn, alias)
         try:
             data, default_name = export_reports_zip_bytes(
-                conn, workspace_id, loot_dir, alias, force=force
+                conn, workspace_id, loot_dir, alias, force=force,
+                include_html=include_html,
             )
         except FileNotFoundError as exc:
             raise CliError(str(exc)) from exc
