@@ -20,9 +20,11 @@ import kitelon_worker as worker
 class Recorder:
     """Stands in for the kitelon_db calls the worker makes; records them."""
 
-    def __init__(self, job=None, paused=False):
+    def __init__(self, job=None, paused=False, owned=True, pending=()):
         self.job = job
         self.paused = paused
+        self.owned = owned
+        self.pending = list(pending)
         self.calls: list[tuple] = []
 
     def install(self, monkeypatch):
@@ -41,11 +43,14 @@ class Recorder:
         monkeypatch.setattr(worker, "queue_paused", lambda _c: self.paused)
         monkeypatch.setattr(worker, "get_running_scan_workspace_ids", lambda _c: set())
         monkeypatch.setattr(worker, "claim_next_job", rec("claim", self.job))
-        monkeypatch.setattr(worker, "complete_job", rec("complete"))
+        monkeypatch.setattr(worker, "complete_job", rec("complete", self.owned))
         monkeypatch.setattr(worker, "requeue_job", rec("requeue", "requeued"))
         monkeypatch.setattr(worker, "touch_heartbeat", rec("heartbeat"))
-        monkeypatch.setattr(worker, "touch_job_heartbeat", rec("job_heartbeat"))
-        monkeypatch.setattr(worker, "set_job_pid", rec("set_pid"))
+        monkeypatch.setattr(
+            worker, "touch_job_heartbeat", lambda _c, *a: self.calls.append(("job_heartbeat", a, {})) or self.owned
+        )
+        monkeypatch.setattr(worker, "set_job_pid", rec("set_pid", True))
+        monkeypatch.setattr(worker, "pending_migrations", lambda _c: list(self.pending))
         return self
 
     def names(self):
@@ -63,7 +68,13 @@ def _reset_worker_state():
     worker._active.clear()
 
 
-JOB = {"id": 5, "job_type": "report", "workspace_alias": "demo", "target": None}
+JOB = {
+    "id": 5,
+    "job_type": "report",
+    "workspace_alias": "demo",
+    "target": None,
+    "started_at": "run-1",
+}
 
 
 # --- heartbeat ---------------------------------------------------------------
@@ -71,11 +82,11 @@ JOB = {"id": 5, "job_type": "report", "workspace_alias": "demo", "target": None}
 
 def test_job_heartbeat_touches_while_running_and_stops_after(monkeypatch):
     rec = Recorder().install(monkeypatch)
-    with worker.job_heartbeat(5, interval=0.02):
+    with worker.job_heartbeat(5, "run-1", interval=0.02):
         time.sleep(0.15)
     beats = rec.names().count("job_heartbeat")
     assert beats >= 3
-    assert all(c[1] == (5,) for c in rec.calls)
+    assert all(c[1] == (5, "run-1") for c in rec.calls)
     time.sleep(0.08)
     assert rec.names().count("job_heartbeat") == beats
 
@@ -130,7 +141,10 @@ def test_execute_one_requeues_job_interrupted_by_shutdown(monkeypatch):
     assert worker.execute_one("post") is True
     requeue = [c for c in rec.calls if c[0] == "requeue"]
     assert requeue and requeue[0][1] == (5,)
-    assert "shut down" in requeue[0][2]["reason"]
+    kw = requeue[0][2]
+    assert "shut down" in kw["reason"]
+    # Scoped to this run, and a shutdown doesn't use up one of the job's attempts.
+    assert kw["claim"] == "run-1" and kw["count_attempt"] is False
     assert "complete" not in rec.names()
 
 
@@ -205,9 +219,63 @@ def test_shutdown_forces_and_requeues_jobs_that_ignore_sigterm(monkeypatch):
     requeue = [c for c in rec.calls if c[0] == "requeue"]
     assert requeue and requeue[0][1] == (11,)
     assert "forced" in requeue[0][2]["reason"]
+    assert requeue[0][2]["count_attempt"] is False
 
 
 # --- recover -----------------------------------------------------------------
+
+
+def test_heartbeat_stops_the_run_when_the_job_was_requeued_elsewhere(monkeypatch):
+    Recorder(owned=False).install(monkeypatch)
+    thread, result = _start_tracked(13, _sleeper())
+    with worker.job_heartbeat(13, "run-1", interval=0.02):
+        thread.join(timeout=5)
+    assert not thread.is_alive()
+    assert result["out"][0] == -signal.SIGTERM
+
+
+def test_result_of_a_run_that_lost_its_job_is_not_recorded_as_owned(monkeypatch):
+    rec = Recorder(job=JOB, owned=False).install(monkeypatch)
+    monkeypatch.setattr(worker, "run_job", lambda job: (0, ""))
+    assert worker.execute_one("post") is True
+    complete = [c for c in rec.calls if c[0] == "complete"]
+    assert complete[0][2]["claim"] == "run-1"
+
+
+def test_requeued_scan_resumes_via_args_key():
+    job = {
+        "id": 3,
+        "job_type": "scan",
+        "workspace_alias": "demo",
+        "target": "example.com",
+        "mode": "normal",
+        # "options" makes merge_job_scan_args rebuild extra_args, which used to
+        # drop a -rr stored there.
+        "args_json": {"options": {"osint": True}, worker.RESUME_ARG_KEY: True},
+    }
+    cmd = worker.build_scan_command(job)
+    assert cmd.count("-rr") == 1
+
+
+def test_fresh_scan_does_not_resume():
+    job = {
+        "id": 3,
+        "job_type": "scan",
+        "workspace_alias": "demo",
+        "target": "example.com",
+        "mode": "normal",
+        "args_json": {},
+    }
+    assert "-rr" not in worker.build_scan_command(job)
+
+
+def test_worker_does_nothing_until_migrations_are_applied(monkeypatch):
+    rec = Recorder(job=JOB, pending=["006_job_owner.sql"]).install(monkeypatch)
+    called = []
+    monkeypatch.setattr(worker, "recover_stuck_jobs", lambda *a: called.append(1))
+    monkeypatch.setattr(worker.signal, "signal", lambda *a: None)
+    worker.run_once()
+    assert called == [] and "claim" not in rec.names()
 
 
 def test_recover_uses_short_stale_window(monkeypatch):

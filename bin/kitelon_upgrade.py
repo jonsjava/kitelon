@@ -11,16 +11,22 @@ Commands:
   resume            Resume the queue (held jobs become pending again)
   drain             Pause, then wait until no scan or job is running
   is-paused         Exit 0 if paused, 1 if not (for scripts)
+  stop-local        Stop direct scans on this host (not worker jobs)
 
-drain exit codes: 0 drained, 2 timed out (still paused), 3 queue unavailable.
+drain exit codes: 0 drained, 2 timed out (still paused), 3 queue unavailable,
+64 bad arguments, 130 interrupted.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import os
+import signal
+import subprocess
 import sys
 import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -35,8 +41,18 @@ EXIT_OK = 0
 EXIT_NOT_PAUSED = 1
 EXIT_TIMEOUT = 2
 EXIT_UNAVAILABLE = 3
+EXIT_USAGE = 64  # distinct from argparse's 2, which drain uses for "timed out"
 
 SCAN_PROCESS_MARKER = "kitelon_scan.py"
+
+
+class ScanBlocked(RuntimeError):
+    """A direct scan was refused because the queue is paused."""
+
+
+def scan_marker_dir() -> Path:
+    """Where in-process scans (kitelon-cli --sync) announce themselves."""
+    return Path(os.environ.get("KITELON_SCAN_MARKER_DIR") or kitelon_db.PAUSE_FILE.parent / "scans")
 
 
 def uses_db() -> bool:
@@ -57,26 +73,120 @@ def pause_file() -> Path:
     return kitelon_db.PAUSE_FILE
 
 
-def local_scan_processes() -> list[dict[str, Any]]:
-    """Kitelon scan processes on this host (direct CLI scans and worker scans)."""
-    procs: list[dict[str, Any]] = []
+def _proc_table() -> list[tuple[int, list[str]]]:
+    """(pid, argv) for every process this host lets us see."""
+    out: list[tuple[int, list[str]]] = []
     proc_root = Path("/proc")
-    if not proc_root.is_dir():
-        return procs
+    if proc_root.is_dir() and (proc_root / "self").exists():
+        for entry in proc_root.iterdir():
+            if not entry.name.isdigit():
+                continue
+            try:
+                raw = (entry / "cmdline").read_bytes()
+            except OSError:
+                continue
+            argv = [a.decode("utf-8", "replace") for a in raw.split(b"\0") if a]
+            if argv:
+                out.append((int(entry.name), argv))
+        return out
+    # No /proc (macOS, BSD): ask ps. Arguments are space-joined, which is
+    # enough to spot the scan script and --job-id.
+    try:
+        listing = subprocess.run(
+            ["ps", "-axo", "pid=,command="], capture_output=True, text=True, check=False
+        ).stdout
+    except OSError:
+        return out
+    for line in listing.splitlines():
+        parts = line.strip().split(None, 1)
+        if len(parts) == 2 and parts[0].isdigit():
+            out.append((int(parts[0]), parts[1].split()))
+    return out
+
+
+def _marker_scans() -> list[dict[str, Any]]:
+    found: list[dict[str, Any]] = []
+    directory = scan_marker_dir()
+    if not directory.is_dir():
+        return found
+    for marker in directory.glob("*.json"):
+        try:
+            info = json.loads(marker.read_text())
+            pid = int(info["pid"])
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+        if not kitelon_db._pid_alive(pid):
+            marker.unlink(missing_ok=True)  # left behind by a crashed scan
+            continue
+        found.append({"pid": pid, "cmd": str(info.get("cmd", "in-process scan"))[:160], "job": False})
+    return found
+
+
+def local_scan_processes() -> list[dict[str, Any]]:
+    """Kitelon scans on this host: direct CLI scans, worker scans, and
+    in-process scans (kitelon-cli --sync) that registered a marker."""
+    procs: list[dict[str, Any]] = []
     own = os.getpid()
-    for entry in proc_root.iterdir():
-        if not entry.name.isdigit() or int(entry.name) == own:
+    for pid, argv in _proc_table():
+        if pid == own:
+            continue
+        if any(a.endswith(SCAN_PROCESS_MARKER) for a in argv):
+            procs.append(
+                {"pid": pid, "cmd": " ".join(argv)[:160], "job": "--job-id" in argv}
+            )
+    seen = {p["pid"] for p in procs}
+    procs.extend(m for m in _marker_scans() if m["pid"] not in seen and m["pid"] != own)
+    return procs
+
+
+def stop_local_scans(sig: int = signal.SIGTERM) -> list[int]:
+    """Signal direct scans on this host. Worker job scans are left alone: their
+    worker requeues them when it is stopped."""
+    stopped = []
+    for proc in local_scan_processes():
+        if proc.get("job"):
             continue
         try:
-            raw = (entry / "cmdline").read_bytes()
+            os.kill(proc["pid"], sig)
+            stopped.append(proc["pid"])
         except OSError:
-            continue
-        if not raw:
-            continue
-        argv = [a.decode("utf-8", "replace") for a in raw.split(b"\0") if a]
-        if any(a.endswith(SCAN_PROCESS_MARKER) for a in argv):
-            procs.append({"pid": int(entry.name), "cmd": " ".join(argv)[:160]})
-    return procs
+            pass
+    return stopped
+
+
+def _queue_paused_quietly() -> bool:
+    try:
+        return Queue().is_paused()
+    except Exception:  # noqa: BLE001 - no database: treat as not paused, like is-paused
+        return pause_file().exists()
+
+
+@contextmanager
+def local_scan_guard(description: str):
+    """Wrap a direct (non-queue) scan: refuse it while paused, and let a drain
+    see it while it runs.
+
+    The marker is written before the pause check, so a concurrent drain either
+    sees the marker or this check sees the pause.
+    """
+    marker = scan_marker_dir() / f"{os.getpid()}.json"
+    wrote = False
+    try:
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(json.dumps({"pid": os.getpid(), "cmd": description}))
+        wrote = True
+    except OSError:
+        pass  # not root: the drain still finds kitelon_scan.py processes in /proc
+    try:
+        if _queue_paused_quietly():
+            raise ScanBlocked(
+                "Kitelon is paused for an upgrade; new scans are blocked. "
+                "Check: sudo kitelon upgrade status   Resume: sudo kitelon upgrade resume"
+            )
+        yield
+    finally:
+        if wrote:
+            marker.unlink(missing_ok=True)
 
 
 def _age(started: Any) -> str:
@@ -232,8 +342,21 @@ def main(argv: list[str] | None = None) -> int:
         help="Resume the queue if the timeout runs out",
     )
     sub.add_parser("is-paused", help="Exit 0 if paused, 1 if not")
-    args = parser.parse_args(argv)
+    sub.add_parser("stop-local", help="Stop direct scans on this host (not worker jobs)")
+    try:
+        args = parser.parse_args(argv)
+    except SystemExit as exc:
+        # argparse exits 2 on bad arguments, which callers would read as
+        # "drain timed out".
+        return EXIT_OK if exc.code in (0, None) else EXIT_USAGE
     cmd = args.cmd or "status"
+    if cmd == "drain" and (args.timeout < 0 or args.interval <= 0):
+        print("drain: --timeout must be >= 0 and --interval > 0", file=sys.stderr)
+        return EXIT_USAGE
+    if cmd == "stop-local":
+        stopped = stop_local_scans()
+        print(f"stopped {len(stopped)} direct scan(s)" + (f": {stopped}" if stopped else ""))
+        return EXIT_OK
 
     queue = Queue()
     try:
@@ -250,13 +373,18 @@ def main(argv: list[str] | None = None) -> int:
             print(f"queue resumed{f'; {released} held job(s) released' if released else ''}")
             return EXIT_OK
         if cmd == "drain":
+            # Only undo a pause this drain made: an admin's pause stays.
+            was_paused = queue.is_paused()
             try:
                 rc = drain(queue, timeout=args.timeout, interval=args.interval)
             except KeyboardInterrupt:
-                queue.resume()
-                print("\ninterrupted; queue resumed", file=sys.stderr)
+                if was_paused:
+                    print("\ninterrupted; queue was already paused and stays paused", file=sys.stderr)
+                else:
+                    queue.resume()
+                    print("\ninterrupted; queue resumed", file=sys.stderr)
                 return 130
-            if rc == EXIT_TIMEOUT and args.resume_on_timeout:
+            if rc == EXIT_TIMEOUT and args.resume_on_timeout and not was_paused:
                 queue.resume()
                 print("queue resumed")
             return rc

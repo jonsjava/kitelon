@@ -47,13 +47,29 @@ def main() -> int:
         "target_file": args.target_file,
     }
     options = {k: v for k, v in options.items() if v is not None}
-    return run_scan(
-        target=args.target,
-        mode=args.mode,
-        workspace=args.workspace,
-        options=options,
-        job_id=args.job_id,
-    )
+    if args.job_id is not None:
+        # Queue job: the worker tracks it and the pause already held the queue.
+        return run_scan(
+            target=args.target,
+            mode=args.mode,
+            workspace=args.workspace,
+            options=options,
+            job_id=args.job_id,
+        )
+    from kitelon_upgrade import ScanBlocked, local_scan_guard
+
+    try:
+        with local_scan_guard(f"kitelon_scan.py {args.target} -w {args.workspace}"):
+            return run_scan(
+                target=args.target,
+                mode=args.mode,
+                workspace=args.workspace,
+                options=options,
+                job_id=None,
+            )
+    except ScanBlocked as exc:
+        print(f"[!] {exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

@@ -5,18 +5,24 @@ All notable changes to Kitelon are documented here.
 ## [0.6.0] - 2026-11-06
 
 ### Upgrades
-- `install.sh force` drains the job queue before replacing files: it pauses the queue, waits for running scans (worker jobs and direct CLI scans) to finish, stops the worker units, installs, then restarts them and resumes the queue, including when the install fails. New flags: `--drain-timeout SEC` (abort with nothing changed), `--force-stop` (interrupt running scans; they're requeued and resume), `--no-drain` (previous behavior).
-- New `kitelon upgrade status|pause|resume|drain|is-paused` command and `upgrade status|pause|resume` in kitelon-cli (`bin/kitelon_upgrade.py`).
-- Queue pause is stored in PostgreSQL when the database is enabled, otherwise in `/var/lib/kitelon/paused` (`KITELON_PAUSE_FILE`). While paused, queued and newly enqueued jobs get the new `held` status, so no worker (including pre-0.6.0 workers) claims them. Direct `kitelon -t` scans refuse to start.
+- `install.sh force` and `kitelon -u` drain the job queue before replacing files (`kitelon -u` drains before its `git pull`, since the pull itself replaces the running code when the install directory is the checkout): it pauses the queue, waits for running scans (worker jobs and direct CLI scans) to finish, stops the worker units, installs, then restarts them and resumes the queue, including when the install fails. New flags: `--drain-timeout SEC` (abort with nothing changed), `--force-stop` (interrupt running scans; they're requeued and resume), `--no-drain` (previous behavior).
+- An upgrade leaves a queue that was already paused (e.g. by `kitelon upgrade pause`) paused, and keeps the queue paused if database migrations didn't run.
+- `--force-stop` also stops a running `kitelon-worker-cron.service` tick (its scan is requeued) and direct CLI scans (re-run them with `-rr`). `--drain-timeout` must be a number of seconds.
+- New `kitelon upgrade status|pause|resume|drain|is-paused|stop-local` command and `upgrade status|pause|resume` in kitelon-cli (`bin/kitelon_upgrade.py`).
+- Queue pause is stored in PostgreSQL when the database is enabled, otherwise in `/var/lib/kitelon/paused` (`KITELON_PAUSE_FILE`). While paused, queued and newly enqueued jobs get the new `held` status, so no worker (including pre-0.6.0 workers) claims them. Direct scans (`kitelon -t` and `kitelon-cli scan --sync`) refuse to start, and running ones hold up the drain. Pausing waits for in-flight enqueues so none slips in as `pending`.
+- `kitelon upgrade` exits 64 on bad arguments (previously argparse's 2, which callers read as "drain timed out"). An interrupted drain only resumes a pause it made.
 
 ### Jobs
-- Interrupted jobs are requeued instead of failed: `recover` requeues a running job whose process has exited (after a 2-minute grace) or whose heartbeat is older than `WORKER_STALE_MINUTES` (default 10). A job that is still heartbeating is never touched, however long it runs, so `recover` no longer kills healthy long scans after 180 minutes (`WORKER_STUCK_MINUTES` is gone). Scan jobs come back with `-rr` and skip finished steps. A job is marked failed after 3 attempts.
-- Migration `005_job_resilience`: `jobs.heartbeat_at`, `jobs.attempts`, `kitelon_settings` table. Run `sudo kitelon db migrate` (the installer does this).
-- `held` jobs can be edited, retried and cancelled like `pending` ones.
+- Interrupted jobs are requeued instead of failed: `recover` requeues a running job whose heartbeat is older than `WORKER_STALE_MINUTES` (default 10), or, for a job claimed on the same host, whose process has exited (after a 2-minute grace). A job that is still heartbeating is never touched, however long it runs, so `recover` no longer kills healthy long scans after 180 minutes (`WORKER_STUCK_MINUTES` is gone). Scan jobs come back resuming (`-rr`) and skip finished steps. A job is marked failed after 3 attempts.
+- `recover` never signals a PID it can't verify as this job's process on this host (`jobs.worker_host` plus the process command line), so it can't kill an unrelated process that reuses the number, e.g. from the Docker recover sidecar.
+- Each run owns its job: result, heartbeat and requeue writes only apply to the run that claimed it. If `recover` requeues a job while its old run is still going (e.g. after a long database outage), the old run is stopped on its next heartbeat and its result is discarded, so a scan never runs twice at once.
+- The resume flag is stored separately from a job's scan arguments, so a manual retry starts a fresh scan, and jobs created with `options` resume correctly.
+- Migrations `005_job_resilience` (`jobs.heartbeat_at`, `jobs.attempts`, `kitelon_settings` table) and `006_job_owner` (`jobs.worker_host`). Run `sudo kitelon db migrate` (the installer does this). Workers wait, without running jobs, until migrations are applied.
+- `held` jobs can be edited, retried and cancelled like `pending` ones, including Edit in the web UI. The API returns a new job's real status (`held` while paused) instead of always `pending`.
 
 ### Worker
 - Workers write a per-job heartbeat every 30s while a job runs (`WORKER_HEARTBEAT_SEC`).
-- On SIGTERM/SIGINT the worker stops claiming jobs, stops the running jobs' processes, and requeues them instead of marking them failed. It waits up to `WORKER_SHUTDOWN_GRACE_SEC` (default 60) before forcing them. The systemd units set `TimeoutStopSec=90` and the Docker worker gets `stop_grace_period: 90s` to allow for this.
+- On SIGTERM/SIGINT the worker (including a `run-once` cron tick) stops claiming jobs, stops the running jobs' processes, and requeues them instead of marking them failed; this doesn't use up one of the job's attempts. It waits up to `WORKER_SHUTDOWN_GRACE_SEC` (default 60) before forcing them. The systemd units set `TimeoutStopSec=90` and the Docker worker gets `stop_grace_period: 90s` to allow for this.
 - The worker runs `recover` once at startup, so jobs orphaned by a crash or reboot are requeued right away.
 - The worker doesn't claim jobs while the queue is paused, even if some are still `pending`.
 

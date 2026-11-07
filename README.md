@@ -199,18 +199,24 @@ sudo kitelon -u
 
 ### Safe upgrades (running scans aren't lost)
 
-`sudo bash install.sh force` (and `kitelon -u`, which calls it) now drains the
-job queue before touching any files:
+`sudo bash install.sh force` and `kitelon -u` now drain the job queue before
+touching any files (`kitelon -u` drains before its `git pull`):
 
 1. Pauses the queue. Queued jobs wait as `held`; running scans keep going.
-2. Waits until no scan job or direct CLI scan is running.
+2. Waits until no scan job or direct scan (`kitelon -t`, `kitelon-cli scan --sync`) is running.
 3. Stops the worker units, installs, runs migrations.
 4. Restarts the workers and resumes the queue, even if the install fails.
+
+If the queue was already paused before the upgrade, it stays paused afterwards.
+If the database migrations can't run, the queue also stays paused: workers won't
+run jobs on an out-of-date schema. Fix the database, then run
+`sudo kitelon db migrate && sudo kitelon upgrade resume`.
 
 ```bash
 sudo bash install.sh force                        # wait as long as it takes
 sudo bash install.sh force --drain-timeout 3600   # give up (nothing changed) after an hour
-sudo bash install.sh force --force-stop           # stop running scans; they're requeued and resume
+sudo bash install.sh force --force-stop           # stop running scans: queued ones are requeued and
+                                                  # resume; direct CLI scans are stopped (re-run with -rr)
 sudo bash install.sh force --no-drain             # old behavior: replace files in place
 ```
 
@@ -221,15 +227,21 @@ sudo kitelon upgrade status       # pause state, held jobs, running scans
 sudo kitelon upgrade pause        # stop new work from starting
 sudo kitelon upgrade drain        # pause + wait for running scans to finish
 sudo kitelon upgrade resume
+sudo kitelon upgrade stop-local   # stop direct scans on this host (not worker jobs)
 ```
 
 The pause flag lives in PostgreSQL when the database is enabled, otherwise in
-`/var/lib/kitelon/paused` (`KITELON_PAUSE_FILE`). Direct `kitelon -t` scans refuse
-to start while paused.
+`/var/lib/kitelon/paused` (`KITELON_PAUSE_FILE`). Direct scans (`kitelon -t`,
+`kitelon-cli scan --sync`) refuse to start while paused.
 
-A scan whose worker dies (crash, reboot, `--force-stop`) is requeued with `-rr`
-by the worker's `recover` pass (every 5 minutes) and skips its finished steps;
-after 3 attempts it's marked failed instead.
+Running jobs heartbeat every 30s (`WORKER_HEARTBEAT_SEC`). When a worker is
+stopped (upgrade, `systemctl restart`, reboot), it stops its running scans and
+requeues them; they resume with `-rr` and skip their finished steps. A
+shutdown doesn't count against a job's 3 attempts. A job whose worker
+crashed is requeued by `recover` (at worker startup and every 5 minutes) once
+its heartbeat is 10 minutes old (`WORKER_STALE_MINUTES`), or after 2 minutes
+if it ran on the same host and its process is gone; after 3 such attempts
+it's marked failed. A manual retry of a job starts a fresh scan.
 
 **Docker:** recreating a container stops what's running in it, so drain first:
 

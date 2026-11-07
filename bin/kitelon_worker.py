@@ -17,6 +17,7 @@ if str(_BIN_DIR) not in sys.path:
     sys.path.insert(0, str(_BIN_DIR))
 
 from kitelon_db import (  # noqa: E402
+    RESUME_ARG_KEY,
     claim_next_job,
     complete_job,
     enqueue_job,
@@ -25,6 +26,7 @@ from kitelon_db import (  # noqa: E402
     get_workspace_by_alias,
     log,
     normalize_workspace_alias,
+    pending_migrations,
     promote_schedules,
     queue_paused,
     recover_stuck_jobs,
@@ -49,6 +51,8 @@ HEARTBEAT_SEC = max(1, int(os.environ.get("WORKER_HEARTBEAT_SEC", "30")))
 # How long a stopping worker waits for running jobs to exit before requeueing
 # them anyway. Keep below systemd's TimeoutStopSec / Docker's stop_grace_period.
 SHUTDOWN_GRACE_SEC = int(os.environ.get("WORKER_SHUTDOWN_GRACE_SEC", "60"))
+# How often a worker waiting on unapplied migrations checks again.
+SCHEMA_RETRY_SEC = int(os.environ.get("WORKER_SCHEMA_RETRY_SEC", "60"))
 POST_CONCURRENCY = max(1, int(os.environ.get("WORKER_POST_CONCURRENCY", "2")))
 WORKER_ROLE = os.environ.get("WORKER_ROLE", "both").lower()
 
@@ -58,12 +62,15 @@ _stop = threading.Event()
 
 # job_id -> subprocess currently running for it, so shutdown can stop them.
 _active: dict[int, subprocess.Popen] = {}
+# job_id -> claim token (its started_at) for jobs this worker is running.
+_claims: dict[int, object] = {}
 _active_lock = threading.RLock()  # re-entrant: the signal handler takes it too
 
 
 def _run_job_process(
     job_id: int, cmd: list[str], *, capture_stdout: bool = True
 ) -> tuple[int, str, str]:
+    claim = _claims.get(job_id)
     """Run a job's subprocess in its own session, tracked for shutdown."""
     proc = subprocess.Popen(
         cmd,
@@ -79,7 +86,7 @@ def _run_job_process(
             # Shutdown began between claim and start: don't run the job.
             _terminate(proc)
         with get_connection() as conn:
-            set_job_pid(conn, job_id, proc.pid)
+            set_job_pid(conn, job_id, proc.pid, claim=claim)
         stdout, stderr = proc.communicate()
     finally:
         with _active_lock:
@@ -100,17 +107,29 @@ def _terminate(proc: subprocess.Popen, sig: int = signal.SIGTERM) -> None:
 
 
 @contextmanager
-def job_heartbeat(job_id: int, interval: float = HEARTBEAT_SEC):
-    """Touch ``jobs.heartbeat_at`` every ``interval`` seconds while the job runs."""
+def job_heartbeat(job_id: int, claim: object = None, interval: float = HEARTBEAT_SEC):
+    """Touch ``jobs.heartbeat_at`` every ``interval`` seconds while the job runs.
+
+    If the job no longer belongs to this run (recover requeued it, e.g. after a
+    long database outage), stop its process so two runs never overlap.
+    """
     done = threading.Event()
 
     def beat() -> None:
         while not done.wait(interval):
             try:
                 with get_connection() as conn:
-                    touch_job_heartbeat(conn, job_id)
+                    owned = touch_job_heartbeat(conn, job_id, claim)
             except Exception as exc:
                 log(f"job {job_id} heartbeat failed: {exc}")
+                continue
+            if not owned:
+                log(f"job {job_id} was requeued elsewhere; stopping this run")
+                with _active_lock:
+                    proc = _active.get(job_id)
+                if proc is not None:
+                    _terminate(proc)
+                return
 
     thread = threading.Thread(target=beat, name=f"kitelon-beat-{job_id}", daemon=True)
     thread.start()
@@ -137,10 +156,14 @@ def build_scan_command(job: dict) -> list[str]:
         args = json.loads(args)
     from kitelon_scan_config import merge_job_scan_args
 
+    resume = bool(args.get(RESUME_ARG_KEY))
     args = merge_job_scan_args(args, trust_extra=True)
     extra = args.get("extra_args", [])
     if isinstance(extra, str):
         extra = extra.split()
+    extra = list(extra)
+    if resume and "-rr" not in extra and "--resume" not in extra:
+        extra.append("-rr")
     cmd.extend(extra)
     return cmd
 
@@ -227,24 +250,37 @@ def execute_one(role: str) -> bool:
         return False
 
     job_id = int(job["id"])
+    claim = job.get("started_at")
+    _claims[job_id] = claim
     log(f"[{role}] running job {job_id} type={job['job_type']} target={job.get('target')}")
-    with job_heartbeat(job_id):
-        try:
-            code, err = run_job(job)
-        except Exception as exc:
-            code, err = 1, str(exc)
+    try:
+        with job_heartbeat(job_id, claim):
+            try:
+                code, err = run_job(job)
+            except Exception as exc:
+                code, err = 1, str(exc)
+    finally:
+        _claims.pop(job_id, None)
 
     if code != 0 and _stop.is_set():
-        # Interrupted by worker shutdown: put it back instead of failing it.
+        # Interrupted by worker shutdown: put it back instead of failing it. A
+        # shutdown isn't the job's fault, so it doesn't use up an attempt.
         with get_connection() as conn:
-            outcome = requeue_job(conn, job_id, reason="worker shut down")
+            outcome = requeue_job(
+                conn, job_id, reason="worker shut down", claim=claim, count_attempt=False
+            )
             touch_heartbeat(conn, job_id, f"{role}: {outcome} on shutdown")
         log(f"[{role}] job {job_id} interrupted by shutdown: {outcome}")
         return True
 
     with get_connection() as conn:
-        complete_job(conn, job_id, exit_code=code, error=err if code != 0 else None)
+        owned = complete_job(
+            conn, job_id, exit_code=code, error=err if code != 0 else None, claim=claim
+        )
         touch_heartbeat(conn, job_id, f"{role}: {'ok' if code == 0 else err[:180]}")
+    if not owned:
+        log(f"[{role}] job {job_id} was requeued while running; result discarded")
+        return True
 
     if code != 0:
         log(f"[{role}] job {job_id} failed ({code}): {err[:300]}")
@@ -280,7 +316,22 @@ def scan_worker_loop() -> None:
         _stop.wait(POLL_SEC)
 
 
+def schema_ready() -> bool:
+    """False (and log why) while database migrations are still unapplied."""
+    with get_connection() as conn:
+        missing = pending_migrations(conn)
+    if missing:
+        log(
+            f"database schema is out of date (unapplied: {', '.join(missing)}); "
+            "not running jobs. Run: sudo kitelon db migrate"
+        )
+        return False
+    return True
+
+
 def recover() -> None:
+    if not schema_ready():
+        return
     with get_connection() as conn:
         stuck = recover_stuck_jobs(conn, STALE_MINUTES)
         promoted = promote_schedules(conn)
@@ -307,6 +358,7 @@ def shutdown(threads: list[threading.Thread], grace: float = SHUTDOWN_GRACE_SEC)
         thread.join(timeout=max(0.0, deadline - time.monotonic()))
     with _active_lock:
         leftover = dict(_active)
+        claims = {job_id: _claims.get(job_id) for job_id in leftover}
     if not leftover:
         log("worker stopped")
         return
@@ -314,7 +366,13 @@ def shutdown(threads: list[threading.Thread], grace: float = SHUTDOWN_GRACE_SEC)
         _terminate(proc, signal.SIGKILL)
     with get_connection() as conn:
         for job_id in leftover:
-            outcome = requeue_job(conn, job_id, reason="worker shut down (forced)")
+            outcome = requeue_job(
+                conn,
+                job_id,
+                reason="worker shut down (forced)",
+                claim=claims[job_id],
+                count_attempt=False,
+            )
             log(f"job {job_id} did not stop within {grace:.0f}s: {outcome}")
 
 
@@ -327,6 +385,16 @@ def run_daemon() -> None:
         raise SystemExit(f"invalid WORKER_ROLE={WORKER_ROLE!r} (use both, scan, or post)")
     signal.signal(signal.SIGTERM, _request_stop)
     signal.signal(signal.SIGINT, _request_stop)
+
+    # Don't claim anything until migrations are applied: the queries below
+    # need the current schema, and failing every poll helps no one.
+    while not _stop.is_set():
+        try:
+            if schema_ready():
+                break
+        except Exception as exc:
+            log(f"database check failed: {exc}")
+        _stop.wait(SCHEMA_RETRY_SEC)
 
     # Requeue jobs orphaned by a previous worker (crash, kill, reboot) now
     # instead of waiting for the next recover run.
@@ -363,6 +431,12 @@ def run_daemon() -> None:
 
 
 def run_once() -> None:
+    # A cron tick can be running a scan when the installer stops it: requeue
+    # the scan instead of failing it.
+    signal.signal(signal.SIGTERM, _request_stop)
+    signal.signal(signal.SIGINT, _request_stop)
+    if not schema_ready():
+        return
     recover()
     if WORKER_ROLE in ("both", "post") and execute_one("post"):
         return

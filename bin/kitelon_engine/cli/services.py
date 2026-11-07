@@ -122,17 +122,25 @@ def run_sync_scan(
         "preset": (options or {}).get("preset"),
     }
     scan_options = {k: v for k, v in scan_options.items() if v not in (None, False)}
-    exit_code = run_scan(
-        target=target,
-        mode=mode,
-        workspace=workspace,
-        options=scan_options,
-        job_id=None,
-    )
-    if exit_code == 0 and workspace:
-        loot_dir = workspace_loot_dir(workspace)
-        import_loot(loot_dir, workspace)
-        generate_reports(loot_dir, workspace)
+    from kitelon_upgrade import ScanBlocked, local_scan_guard
+
+    # Runs in this process, so register it for upgrade drains and honour the
+    # pause like `kitelon -t` does.
+    try:
+        with local_scan_guard(f"kitelon-cli scan {target} -w {workspace} --sync"):
+            exit_code = run_scan(
+                target=target,
+                mode=mode,
+                workspace=workspace,
+                options=scan_options,
+                job_id=None,
+            )
+            if exit_code == 0 and workspace:
+                loot_dir = workspace_loot_dir(workspace)
+                import_loot(loot_dir, workspace)
+                generate_reports(loot_dir, workspace)
+    except ScanBlocked as exc:
+        raise CliError(str(exc)) from exc
     return exit_code
 
 

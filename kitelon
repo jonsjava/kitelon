@@ -355,9 +355,31 @@ function update {
   echo -e "$KL_C_INFO[$KL_RESET${KL_C_ERR}i${KL_RESET}$KL_C_INFO] Pull updates from $REMOTE and reinstall? (y or n)$KL_RESET"
   read ans
   if [[ "$ans" = "y" ]] || [[ "$ans" = "Y" ]]; then
+    # Drain before `git pull`: when $INSTALL_DIR is the checkout, the pull
+    # itself replaces the code running scans use.
+    local helper="$INSTALL_DIR/bin/kitelon_upgrade.py" drained=0 resume_queue=0 rc=0
+    if [[ -f "$helper" ]]; then
+      KITELON_INSTALL_DIR="$INSTALL_DIR" python3 "$helper" is-paused >/dev/null 2>&1 || resume_queue=1
+      echo -e "$KL_C_INFO[*]$KL_RESET Pausing the job queue and waiting for running scans to finish (Ctrl-C to abort)..."
+      KITELON_INSTALL_DIR="$INSTALL_DIR" python3 "$helper" drain || rc=$?
+      case "$rc" in
+        0) drained=1 ;;
+        3) resume_queue=0 ;;  # no job queue: nothing to drain or resume
+        130) echo "Update cancelled. Nothing was changed."; exit 1 ;;
+        *)
+          [[ "$resume_queue" == "1" ]] && KITELON_INSTALL_DIR="$INSTALL_DIR" python3 "$helper" resume
+          echo "Could not drain the job queue (exit $rc). Nothing was changed."
+          exit 1
+          ;;
+      esac
+    fi
     cd "$REPO_ROOT"
-    git pull "$REMOTE" "$(git branch --show-current 2>/dev/null || echo master)"
-    bash "$REPO_ROOT/install.sh" force
+    if ! git pull "$REMOTE" "$(git branch --show-current 2>/dev/null || echo master)"; then
+      [[ "$resume_queue" == "1" ]] && KITELON_INSTALL_DIR="$INSTALL_DIR" python3 "$helper" resume
+      echo "git pull failed. Nothing was installed."
+      exit 1
+    fi
+    KITELON_PREDRAINED="$drained" KITELON_RESUME_QUEUE="$resume_queue" bash "$REPO_ROOT/install.sh" force
     exit
   fi
 }
