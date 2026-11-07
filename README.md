@@ -190,17 +190,31 @@ Scan output is stored under `/usr/share/kitelon/loot/workspace/<alias>/`.
 
 ## Updates
 
-Auto-updates from upstream are disabled by default. To update from a git remote
-you configure:
+`kitelon -u` updates Kitelon from GitHub
+([jonsjava/kitelon](https://github.com/jonsjava/kitelon), branch `main`):
 
 ```bash
-sudo kitelon -u
+sudo kitelon -u                  # show what would change, ask, then install
+sudo kitelon -u -y               # don't ask
+sudo kitelon -u --force          # reinstall even if up to date (or to downgrade)
+sudo kitelon -u --force-stop     # install.sh flags are passed through
 ```
+
+It keeps a clone in `/var/lib/kitelon/src`, fetches the branch into it, and
+compares its `VERSION` and commit with what's installed. A new commit counts
+as an update even without a version bump, and an older version is never
+installed without `--force`. It then runs that clone's `install.sh force`,
+with your `kitelon.conf` carried over. The install directory doesn't need to
+be a git checkout. Nothing auto-updates; Kitelon only updates when you run this.
+
+To follow another repository or branch, set these in `kitelon.conf` (or the
+environment): `KITELON_UPDATE_REPO`, `KITELON_UPDATE_BRANCH`, and
+`KITELON_SRC_DIR` for the clone's location.
 
 ### Safe upgrades (running scans aren't lost)
 
 `sudo bash install.sh force` and `kitelon -u` now drain the job queue before
-touching any files (`kitelon -u` drains before its `git pull`):
+touching any files:
 
 1. Pauses the queue. Queued jobs wait as `held`; running scans keep going.
 2. Waits until no scan job or direct scan (`kitelon -t`, `kitelon-cli scan --sync`) is running.

@@ -22,6 +22,9 @@ loot/workspace/
 loot/**/*
 !loot/README.md
 
+# Written by kitelon -u: the commit an install came from
+/SOURCE_COMMIT
+
 # Local / runtime config (never commit secrets)
 /kitelon.conf
 .kitelon.conf

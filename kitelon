@@ -319,69 +319,26 @@ kitelon_stop_cmd() {
 
 function check_update {
   if [[ "$ENABLE_AUTO_UPDATES" == "1" ]] && [[ "$ONLINE" == "1" ]]; then
-    echo -e "$KL_C_INFO[$KL_RESET${KL_C_ERR}i${KL_RESET}$KL_C_INFO] Updates are available via$KL_C_ERR \"kitelon -u\"$KL_RESET when a git remote is configured."
+    echo -e "$KL_C_INFO[$KL_RESET${KL_C_ERR}i${KL_RESET}$KL_C_INFO] Check for updates with$KL_C_ERR \"sudo kitelon -u\"$KL_RESET (from github.com/jonsjava/kitelon)."
   fi
   touch /tmp/kitelon-update-check.txt 2> /dev/null
 }
 
 function update {
+  # Fetches the latest Kitelon from GitHub (KITELON_UPDATE_REPO, branch
+  # KITELON_UPDATE_BRANCH) into a separate clone and installs it with
+  # install.sh, which drains the job queue first. See bin/kitelon_update.sh.
   kl_print_header
-  echo -e "$KL_C_INFO[*]$KL_RESET Checking for updates...$KL_C_INFO[$KL_RESET${KL_C_OK}OK${KL_RESET}$KL_C_INFO]$KL_RESET"
-
-  if [[ "$ONLINE" == "0" ]]; then
-    echo "No internet connection. Cannot check for updates."
+  if [[ $EUID -ne 0 ]]; then
+    echo "Updating Kitelon needs root: sudo kitelon -u"
     exit 1
   fi
-
-  if ! command -v git &>/dev/null; then
-    echo "git is not installed. Cannot update from source."
-    exit 1
-  fi
-
-  REPO_ROOT=$(cd "$INSTALL_DIR" && git rev-parse --show-toplevel 2>/dev/null)
-  if [[ -z "$REPO_ROOT" ]]; then
-    echo "No git repository found at $INSTALL_DIR."
-    echo "Configure a remote and reinstall from source, or copy updates manually."
-    exit 1
-  fi
-
-  REMOTE=$(cd "$REPO_ROOT" && git remote 2>/dev/null | head -1)
-  if [[ -z "$REMOTE" ]]; then
-    echo "No git remote configured for this installation."
-    echo "Add a remote to your checkout, then run: kitelon -u"
-    exit 1
-  fi
-
-  echo -e "$KL_C_INFO[$KL_RESET${KL_C_ERR}i${KL_RESET}$KL_C_INFO] Pull updates from $REMOTE and reinstall? (y or n)$KL_RESET"
-  read ans
-  if [[ "$ans" = "y" ]] || [[ "$ans" = "Y" ]]; then
-    # Drain before `git pull`: when $INSTALL_DIR is the checkout, the pull
-    # itself replaces the code running scans use.
-    local helper="$INSTALL_DIR/bin/kitelon_upgrade.py" drained=0 resume_queue=0 rc=0
-    if [[ -f "$helper" ]]; then
-      KITELON_INSTALL_DIR="$INSTALL_DIR" python3 "$helper" is-paused >/dev/null 2>&1 || resume_queue=1
-      echo -e "$KL_C_INFO[*]$KL_RESET Pausing the job queue and waiting for running scans to finish (Ctrl-C to abort)..."
-      KITELON_INSTALL_DIR="$INSTALL_DIR" python3 "$helper" drain || rc=$?
-      case "$rc" in
-        0) drained=1 ;;
-        3) resume_queue=0 ;;  # no job queue: nothing to drain or resume
-        130) echo "Update cancelled. Nothing was changed."; exit 1 ;;
-        *)
-          [[ "$resume_queue" == "1" ]] && KITELON_INSTALL_DIR="$INSTALL_DIR" python3 "$helper" resume
-          echo "Could not drain the job queue (exit $rc). Nothing was changed."
-          exit 1
-          ;;
-      esac
-    fi
-    cd "$REPO_ROOT"
-    if ! git pull "$REMOTE" "$(git branch --show-current 2>/dev/null || echo master)"; then
-      [[ "$resume_queue" == "1" ]] && KITELON_INSTALL_DIR="$INSTALL_DIR" python3 "$helper" resume
-      echo "git pull failed. Nothing was installed."
-      exit 1
-    fi
-    KITELON_PREDRAINED="$drained" KITELON_RESUME_QUEUE="$resume_queue" bash "$REPO_ROOT/install.sh" force
-    exit
-  fi
+  INSTALL_DIR="$INSTALL_DIR" \
+    KITELON_UPDATE_REPO="${KITELON_UPDATE_REPO:-}" \
+    KITELON_UPDATE_BRANCH="${KITELON_UPDATE_BRANCH:-}" \
+    KITELON_SRC_DIR="${KITELON_SRC_DIR:-}" \
+    bash "$INSTALL_DIR/bin/kitelon_update.sh" "$@"
+  exit $?
 }
 
 if [[ "$UPDATE" = "1" ]]; then
@@ -674,9 +631,9 @@ case $key in
     ;;
     -u|--update)
     UPDATE="1"
-    update
-    exit
     shift
+    update "$@"
+    exit
     ;;
     -rr|--resume)
     RESUME="1"

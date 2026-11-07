@@ -1687,56 +1687,49 @@ kitelon_upgrade_prepare() {
 
     trap kitelon_upgrade_finish EXIT
 
-    if [[ "${KITELON_PREDRAINED:-0}" == "1" ]]; then
-        # `kitelon -u` drained before pulling the new code; it tells us whether
-        # the queue is ours to resume.
-        KL_UPGRADE_PAUSED="${KITELON_RESUME_QUEUE:-0}"
-        kl_msg_ok "Queue already drained"
-    else
-        local was_paused=0
-        kitelon_upgrade_helper is-paused >/dev/null 2>&1 && was_paused=1
-        [[ "$was_paused" == "1" ]] && kl_msg_info "The job queue was already paused; it will stay paused after the upgrade."
-        kl_msg_info "Pausing the job queue and waiting for running scans to finish (Ctrl-C to abort)..."
-        local rc=0 ours=$((1 - was_paused))
-        kitelon_upgrade_helper drain --timeout "$KL_DRAIN_TIMEOUT" || rc=$?
-        case "$rc" in
-            0)
-                KL_UPGRADE_PAUSED=$ours
-                kl_msg_ok "Queue drained"
-                ;;
-            2)
-                KL_UPGRADE_PAUSED=$ours
-                if [[ "$KL_FORCE_STOP" == "1" ]]; then
-                    kl_msg_warn "Drain timed out; --force-stop given, stopping scans that are still running."
-                    kl_msg_warn "Queued scans are requeued by their worker and resume from their last finished step."
-                    kl_msg_warn "Direct CLI scans are stopped; re-run them with -rr to resume."
-                else
-                    kl_msg_err "Scans are still running after ${KL_DRAIN_TIMEOUT}s. Nothing was changed."
-                    kl_msg_err "Re-run later, raise --drain-timeout, or use --force-stop to interrupt and resume them."
-                    exit 1
-                fi
-                ;;
-            3|127)
-                kl_msg_warn "Job queue unavailable (no database or helper); continuing without a drain"
-                ;;
-            64)
-                kl_msg_err "The upgrade helper rejected its arguments. Nothing was changed."
+    local was_paused=0
+    kitelon_upgrade_helper is-paused >/dev/null 2>&1 && was_paused=1
+    [[ "$was_paused" == "1" ]] && kl_msg_info "The job queue was already paused; it will stay paused after the upgrade."
+    kl_msg_info "Pausing the job queue and waiting for running scans to finish (Ctrl-C to abort)..."
+    local rc=0 ours=$((1 - was_paused))
+    kitelon_upgrade_helper drain --timeout "$KL_DRAIN_TIMEOUT" || rc=$?
+    case "$rc" in
+        0)
+            KL_UPGRADE_PAUSED=$ours
+            kl_msg_ok "Queue drained"
+            ;;
+        2)
+            KL_UPGRADE_PAUSED=$ours
+            if [[ "$KL_FORCE_STOP" == "1" ]]; then
+                kl_msg_warn "Drain timed out; --force-stop given, stopping scans that are still running."
+                kl_msg_warn "Queued scans are requeued by their worker and resume from their last finished step."
+                kl_msg_warn "Direct CLI scans are stopped; re-run them with -rr to resume."
+            else
+                kl_msg_err "Scans are still running after ${KL_DRAIN_TIMEOUT}s. Nothing was changed."
+                kl_msg_err "Re-run later, raise --drain-timeout, or use --force-stop to interrupt and resume them."
                 exit 1
-                ;;
-            130)
-                kl_msg_info "Upgrade cancelled. Nothing was changed."
+            fi
+            ;;
+        3|127)
+            kl_msg_warn "Job queue unavailable (no database or helper); continuing without a drain"
+            ;;
+        64)
+            kl_msg_err "The upgrade helper rejected its arguments. Nothing was changed."
+            exit 1
+            ;;
+        130)
+            kl_msg_info "Upgrade cancelled. Nothing was changed."
+            exit 1
+            ;;
+        *)
+            KL_UPGRADE_PAUSED=$ours
+            if [[ "$KL_FORCE_STOP" != "1" ]]; then
+                kl_msg_err "Could not drain the job queue (exit $rc). Nothing was changed. Use --force-stop to upgrade anyway."
                 exit 1
-                ;;
-            *)
-                KL_UPGRADE_PAUSED=$ours
-                if [[ "$KL_FORCE_STOP" != "1" ]]; then
-                    kl_msg_err "Could not drain the job queue (exit $rc). Nothing was changed. Use --force-stop to upgrade anyway."
-                    exit 1
-                fi
-                kl_msg_warn "Could not drain the job queue (exit $rc); continuing because of --force-stop"
-                ;;
-        esac
-    fi
+            fi
+            kl_msg_warn "Could not drain the job queue (exit $rc); continuing because of --force-stop"
+            ;;
+    esac
 
     if [[ ${#KL_UPGRADE_UNITS[@]} -gt 0 ]]; then
         kl_msg_info "Stopping worker units: ${KL_UPGRADE_UNITS[*]}"
