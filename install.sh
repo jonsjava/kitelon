@@ -1601,6 +1601,130 @@ cleanup() {
 }
 
 # Main installation flow
+# ---------------------------------------------------------------------------
+# Safe upgrade: drain the job queue before replacing files, restart after.
+# Flags (after "force"): --drain-timeout SEC, --force-stop, --no-drain
+# Env equivalents: KITELON_DRAIN_TIMEOUT, KITELON_FORCE_STOP=1, KITELON_NO_DRAIN=1
+# ---------------------------------------------------------------------------
+KL_DRAIN_TIMEOUT="${KITELON_DRAIN_TIMEOUT:-0}"
+KL_FORCE_STOP="${KITELON_FORCE_STOP:-0}"
+KL_NO_DRAIN="${KITELON_NO_DRAIN:-0}"
+KL_UPGRADE_UNITS=()
+KL_UPGRADE_PAUSED=0
+KL_UPGRADE_STOPPED=0
+KL_WORKER_UNITS=(kitelon-worker kitelon-worker-scan kitelon-worker-post kitelon-worker-cron.timer)
+
+parse_upgrade_flags() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --drain-timeout)
+                KL_DRAIN_TIMEOUT="${2:-0}"
+                shift
+                ;;
+            --drain-timeout=*)
+                KL_DRAIN_TIMEOUT="${1#*=}"
+                ;;
+            --force-stop)
+                KL_FORCE_STOP=1
+                ;;
+            --no-drain)
+                KL_NO_DRAIN=1
+                ;;
+        esac
+        shift
+    done
+}
+
+kitelon_upgrade_helper() {
+    # Prefer the helper being installed (it understands this release's schema);
+    # fall back to the installed copy.
+    local helper="$SCRIPT_DIR/bin/kitelon_upgrade.py"
+    [[ -f "$helper" ]] || helper="$INSTALL_DIR/bin/kitelon_upgrade.py"
+    [[ -f "$helper" ]] || return 127
+    KITELON_INSTALL_DIR="$INSTALL_DIR" PYTHONPATH="$(dirname "$helper")" \
+        python3 "$helper" "$@"
+}
+
+kitelon_upgrade_prepare() {
+    # Fresh install: nothing to drain.
+    [[ -f "$INSTALL_DIR/bin/kitelon_worker.py" ]] || return 0
+    if [[ "$KL_NO_DRAIN" == "1" ]]; then
+        kl_msg_warn "Skipping queue drain (--no-drain): running scans may break during the upgrade"
+        return 0
+    fi
+
+    if [[ "$OS" != "macos" ]] && [[ "${KITELON_DOCKER:-0}" != "1" ]] && command -v systemctl >/dev/null 2>&1; then
+        local unit
+        for unit in "${KL_WORKER_UNITS[@]}"; do
+            if systemctl is-active --quiet "$unit" 2>/dev/null; then
+                KL_UPGRADE_UNITS+=("$unit")
+            fi
+        done
+    fi
+
+    trap kitelon_upgrade_finish EXIT
+    kl_msg_info "Pausing the job queue and waiting for running scans to finish (Ctrl-C to abort)..."
+    local rc=0
+    kitelon_upgrade_helper drain --timeout "$KL_DRAIN_TIMEOUT" || rc=$?
+    case "$rc" in
+        0)
+            KL_UPGRADE_PAUSED=1
+            kl_msg_ok "Queue drained"
+            ;;
+        2)
+            KL_UPGRADE_PAUSED=1
+            if [[ "$KL_FORCE_STOP" == "1" ]]; then
+                kl_msg_warn "Drain timed out; --force-stop given, stopping workers with scans still running."
+                kl_msg_warn "Interrupted scans are requeued by the worker's recover pass and resume from their last finished step."
+            else
+                kl_msg_err "Scans are still running after ${KL_DRAIN_TIMEOUT}s. Nothing was changed."
+                kl_msg_err "Re-run later, raise --drain-timeout, or use --force-stop to interrupt and resume them."
+                exit 1
+            fi
+            ;;
+        3|127)
+            kl_msg_warn "Job queue unavailable (no database or helper); continuing without a drain"
+            ;;
+        130)
+            kl_msg_info "Upgrade cancelled; queue resumed. Nothing was changed."
+            exit 1
+            ;;
+        *)
+            KL_UPGRADE_PAUSED=1
+            if [[ "$KL_FORCE_STOP" != "1" ]]; then
+                kl_msg_err "Could not drain the job queue (exit $rc). Nothing was changed. Use --force-stop to upgrade anyway."
+                exit 1
+            fi
+            kl_msg_warn "Could not drain the job queue (exit $rc); continuing because of --force-stop"
+            ;;
+    esac
+
+    if [[ ${#KL_UPGRADE_UNITS[@]} -gt 0 ]]; then
+        kl_msg_info "Stopping worker units: ${KL_UPGRADE_UNITS[*]}"
+        systemctl stop "${KL_UPGRADE_UNITS[@]}" || kl_msg_warn "Some worker units did not stop cleanly"
+        KL_UPGRADE_STOPPED=1
+    fi
+}
+
+kitelon_upgrade_finish() {
+    local rc=$?
+    trap - EXIT
+    if [[ "$KL_UPGRADE_STOPPED" == "1" ]]; then
+        systemctl daemon-reload 2>/dev/null || true
+        kl_msg_info "Starting worker units: ${KL_UPGRADE_UNITS[*]}"
+        systemctl start "${KL_UPGRADE_UNITS[@]}" \
+            || kl_msg_warn "Could not start all worker units; check: systemctl status ${KL_UPGRADE_UNITS[*]}"
+    fi
+    if [[ "$KL_UPGRADE_PAUSED" == "1" ]]; then
+        if kitelon_upgrade_helper resume; then
+            kl_msg_ok "Job queue resumed"
+        else
+            kl_msg_warn "Could not resume the job queue; run: sudo kitelon upgrade resume"
+        fi
+    fi
+    exit "$rc"
+}
+
 main() {
     kl_msg_warn "This script will install Kitelon under $INSTALL_DIR."
 
@@ -1618,6 +1742,10 @@ main() {
     
     # Check root privileges
     check_root
+
+    # Existing install: pause the queue and wait for running scans first
+    parse_upgrade_flags "$@"
+    kitelon_upgrade_prepare
     
     # Create directories
     create_directories

@@ -82,6 +82,7 @@ from kitelon_engine.cli.services import (
     run_db_command,
     run_db_import,
     run_sync_scan,
+    run_upgrade_command,
     wait_for_job,
 )
 from kitelon_engine.cli.help_text import CONTEXT_HELP_COMMANDS, show_context_help
@@ -949,6 +950,25 @@ class KitelonShell(Cmd):
             return self._success()
         except CliError as exc:
             return self._failure(str(exc))
+
+    upgrade_parser = Cmd2ArgumentParser()
+    upgrade_sub = upgrade_parser.add_subparsers(dest="upgrade_cmd")
+    upgrade_sub.add_parser("status", help="Pause state and running work")
+    upgrade_sub.add_parser("pause", help="Pause the job queue (running work continues)")
+    upgrade_sub.add_parser("resume", help="Resume the job queue")
+
+    @with_argparser(upgrade_parser)
+    @with_category("Database")
+    def do_upgrade(self, args: argparse.Namespace) -> bool:
+        """Pause or resume the job queue around an upgrade."""
+        try:
+            msg = run_upgrade_command(args.upgrade_cmd or "status")
+        except CliError as exc:
+            return self._failure(str(exc))
+        if "\n" in msg:
+            self.poutput(msg)
+            return self._success()
+        return self._success(msg)
 
     # --- rich help ---
 

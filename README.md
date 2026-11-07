@@ -197,6 +197,48 @@ you configure:
 sudo kitelon -u
 ```
 
+### Safe upgrades (running scans aren't lost)
+
+`sudo bash install.sh force` (and `kitelon -u`, which calls it) now drains the
+job queue before touching any files:
+
+1. Pauses the queue. Queued jobs wait as `held`; running scans keep going.
+2. Waits until no scan job or direct CLI scan is running.
+3. Stops the worker units, installs, runs migrations.
+4. Restarts the workers and resumes the queue, even if the install fails.
+
+```bash
+sudo bash install.sh force                        # wait as long as it takes
+sudo bash install.sh force --drain-timeout 3600   # give up (nothing changed) after an hour
+sudo bash install.sh force --force-stop           # stop running scans; they're requeued and resume
+sudo bash install.sh force --no-drain             # old behavior: replace files in place
+```
+
+You can also control the queue by hand:
+
+```bash
+sudo kitelon upgrade status       # pause state, held jobs, running scans
+sudo kitelon upgrade pause        # stop new work from starting
+sudo kitelon upgrade drain        # pause + wait for running scans to finish
+sudo kitelon upgrade resume
+```
+
+The pause flag lives in PostgreSQL when the database is enabled, otherwise in
+`/var/lib/kitelon/paused` (`KITELON_PAUSE_FILE`). Direct `kitelon -t` scans refuse
+to start while paused.
+
+A scan whose worker dies (crash, reboot, `--force-stop`) is requeued with `-rr`
+by the worker's `recover` pass (every 5 minutes) and skips its finished steps;
+after 3 attempts it's marked failed instead.
+
+**Docker:** recreating a container stops what's running in it, so drain first:
+
+```bash
+docker compose exec kitelon-worker kitelon upgrade drain
+docker compose build && docker compose up -d
+docker compose exec kitelon-worker kitelon upgrade resume
+```
+
 ## Engine
 
 The scan engine includes:

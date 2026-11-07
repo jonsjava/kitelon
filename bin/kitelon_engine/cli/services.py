@@ -236,6 +236,24 @@ def export_reports_bundle(
     return out_path
 
 
+def run_upgrade_command(cmd: str) -> str:
+    """status | pause | resume for the job queue (see bin/kitelon_upgrade.py)."""
+    import contextlib
+    import io
+
+    import kitelon_upgrade
+
+    if cmd not in ("status", "pause", "resume"):
+        raise CliError(f"unknown upgrade command: {cmd}")
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+        rc = kitelon_upgrade.main([cmd])
+    out = buf.getvalue().strip()
+    if rc != 0:
+        raise CliError(out or f"upgrade {cmd} failed (exit {rc})")
+    return out
+
+
 def run_db_command(cmd: str, *, loot_root: Path | None = None) -> str:
     root = loot_root or LOOT_ROOT
     if cmd == "migrate":

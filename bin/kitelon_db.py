@@ -1078,15 +1078,19 @@ def enqueue_job(
             raise ValueError("target required for scan jobs")
     elif job_type in POST_JOB_TYPES and not workspace_id:
         raise ValueError(f"workspace required for {job_type} jobs")
+    # While the queue is paused for an upgrade, new work waits as 'held' so no
+    # worker (including one older than the pause flag) can claim it.
+    status = "held" if queue_paused(conn) else "pending"
     row = conn.execute(
         """
         INSERT INTO jobs(
-            workspace_id, job_type, target, mode, args_json, priority,
+            status, workspace_id, job_type, target, mode, args_json, priority,
             scheduled_at, created_by
-        ) VALUES(%s, %s, %s, %s, %s::jsonb, %s, %s, %s)
+        ) VALUES(%s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s)
         RETURNING id
         """,
         (
+            status,
             workspace_id,
             job_type,
             target,
@@ -1256,9 +1260,9 @@ def update_job(conn: Any, job_id: int, **fields: Any) -> dict[str, Any]:
     job = get_job(conn, job_id)
     if not job:
         raise ValueError(f"job not found: {job_id}")
-    if job["status"] != "pending":
+    if job["status"] not in ("pending", "held"):
         raise ValueError(
-            f"can only update pending jobs (job {job_id} is {job['status']})"
+            f"can only update pending or held jobs (job {job_id} is {job['status']})"
         )
 
     sets: list[str] = []

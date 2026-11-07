@@ -153,6 +153,14 @@ $star REPORTS
  kitelon -w <WORKSPACE> --reports-zip --pdf-only
    (packs all reports — scan, pentest, SSL/TLS — into one ZIP as PDF + HTML)
 
+$star UPGRADE (pause the queue / drain running scans)
+ kitelon upgrade status
+ kitelon upgrade pause | resume
+ kitelon upgrade drain [--timeout SEC]
+ sudo bash install.sh force [--drain-timeout SEC] [--force-stop] [--no-drain]
+   (install.sh drains automatically: waits for running scans, stops workers,
+    upgrades, restarts workers, resumes the queue)
+
 $star ADMIN
  kitelon -w <WORKSPACE> --export
  kitelon --import-zip /path/to/workspace.zip
@@ -202,6 +210,9 @@ kitelon_cmd_is_meta() {
       return 0
       ;;
     *"--reports-zip"*|*"--reports-pdf"*)
+      return 0
+      ;;
+    *"kitelon upgrade"*)
       return 0
       ;;
     *" -h"|*" -u"|*" -d"|*" --delete"*|*" -dh"*|*" -dt"*)
@@ -370,6 +381,7 @@ function check_online {
 # COMMAND LINE SWITCHES
 DB_SUBCMD=""
 JOBS_SUBCMD=""
+UPGRADE_SUBCMD=""
 WORKSPACES_SUBCMD=""
 WEB_MODE=""
 POSITIONAL=()
@@ -508,6 +520,11 @@ case $key in
       shift
     fi
     ;;
+    upgrade)
+    UPGRADE_SUBCMD="${2:-status}"
+    shift
+    [[ $# -gt 0 ]] && shift
+    ;;
     jobs)
     JOBS_SUBCMD="$2"
     shift
@@ -645,7 +662,7 @@ case $key in
     ;;
     *)
     # jobs/workspaces/db forward remaining tokens (aliases, --limit, --json, …)
-    if [[ -n "$JOBS_SUBCMD" || -n "$WORKSPACES_SUBCMD" || -n "$DB_SUBCMD" ]]; then
+    if [[ -n "$JOBS_SUBCMD" || -n "$WORKSPACES_SUBCMD" || -n "$DB_SUBCMD" || -n "$UPGRADE_SUBCMD" ]]; then
       POSITIONAL+=("$1")
       shift
       continue
@@ -664,6 +681,13 @@ kitelon_export_db_env() {
   export DB_NAME="${DB_NAME:-kitelon}"
   export DB_USER="${DB_USER:-postgres}"
 }
+
+if [[ -n "$UPGRADE_SUBCMD" ]]; then
+  export PYTHONPATH="$INSTALL_DIR/bin${PYTHONPATH:+:$PYTHONPATH}"
+  kitelon_export_db_env
+  KITELON_INSTALL_DIR="$INSTALL_DIR" python3 "$INSTALL_DIR/bin/kitelon_upgrade.py" "$UPGRADE_SUBCMD" "$@"
+  exit $?
+fi
 
 if [[ -n "$DB_SUBCMD" ]]; then
   export PYTHONPATH="$INSTALL_DIR/bin${PYTHONPATH:+:$PYTHONPATH}"
@@ -837,6 +861,12 @@ function kitelon_run_scan {
   kl_require_authorized_use
   init
   export PYTHONPATH="$INSTALL_DIR/bin${PYTHONPATH:+:$PYTHONPATH}"
+  kitelon_export_db_env
+  if KITELON_INSTALL_DIR="$INSTALL_DIR" python3 "$INSTALL_DIR/bin/kitelon_upgrade.py" is-paused 2>/dev/null; then
+    echo -e "$KL_C_ERR[!]$KL_RESET Kitelon is paused for an upgrade; new scans are blocked."
+    echo -e "    Check: sudo kitelon upgrade status   Resume: sudo kitelon upgrade resume"
+    exit 1
+  fi
   SCAN_CMD=(python3 "$INSTALL_DIR/bin/kitelon_scan.py" --target "$TARGET" --mode "${MODE:-normal}")
   [[ -n "$WORKSPACE" ]] && SCAN_CMD+=(--workspace "$WORKSPACE")
   [[ "$RESUME" == "1" ]] && SCAN_CMD+=(--resume)
