@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import signal
+import socket
 import sqlite3
 import sys
 from contextlib import contextmanager
@@ -1078,15 +1079,20 @@ def enqueue_job(
             raise ValueError("target required for scan jobs")
     elif job_type in POST_JOB_TYPES and not workspace_id:
         raise ValueError(f"workspace required for {job_type} jobs")
+    # While the queue is paused for an upgrade, new work waits as 'held' so no
+    # worker (including one older than the pause flag) can claim it.
+    _lock_pause_shared(conn)
+    status = "held" if queue_paused(conn) else "pending"
     row = conn.execute(
         """
         INSERT INTO jobs(
-            workspace_id, job_type, target, mode, args_json, priority,
+            status, workspace_id, job_type, target, mode, args_json, priority,
             scheduled_at, created_by
-        ) VALUES(%s, %s, %s, %s, %s::jsonb, %s, %s, %s)
+        ) VALUES(%s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s)
         RETURNING id
         """,
         (
+            status,
             workspace_id,
             job_type,
             target,
@@ -1155,30 +1161,79 @@ def claim_next_job(
         ).fetchone()
         if busy:
             return None
-    conn.execute(
+    claimed = conn.execute(
         """
-        UPDATE jobs SET status = 'running', started_at = NOW(), pid = NULL
+        UPDATE jobs SET status = 'running', started_at = clock_timestamp(),
+            heartbeat_at = NOW(), attempts = COALESCE(attempts, 0) + 1, pid = NULL,
+            worker_host = %s
         WHERE id = %s
+        RETURNING started_at, attempts
         """,
-        (row["id"],),
+        (WORKER_HOST, row["id"]),
+    ).fetchone()
+    job = dict(row)
+    job["status"] = "running"
+    job["worker_host"] = WORKER_HOST
+    if claimed:
+        job["started_at"] = claimed["started_at"]
+        job["attempts"] = claimed["attempts"]
+    return job
+
+
+# A job is owned by the run that claimed it, identified by its ``started_at``
+# (requeue clears it, the next claim sets a new one). Worker writes pass it as
+# ``claim`` so a run that lost the job to recover can't overwrite the new run.
+def _owner_filter(claim: Any) -> tuple[str, tuple]:
+    if claim is None:
+        return "", ()
+    return " AND status = 'running' AND started_at = %s", (claim,)
+
+
+def touch_job_heartbeat(conn: Any, job_id: int, claim: Any = None) -> bool:
+    """Refresh a running job's heartbeat. False when the caller no longer owns it."""
+    where, extra = _owner_filter(claim)
+    if not where:
+        where = " AND status = 'running'"
+    cur = conn.execute(
+        f"UPDATE jobs SET heartbeat_at = NOW() WHERE id = %s{where}",
+        (job_id, *extra),
     )
-    return dict(row)
+    return bool(getattr(cur, "rowcount", 1))
 
 
-def complete_job(conn: Any, job_id: int, exit_code: int = 0, error: str | None = None) -> None:
+def complete_job(
+    conn: Any,
+    job_id: int,
+    exit_code: int = 0,
+    error: str | None = None,
+    *,
+    claim: Any = None,
+) -> bool:
+    """Record a job's result. False when ``claim`` no longer owns the job."""
     status = "completed" if exit_code == 0 else "failed"
-    conn.execute(
-        """
+    where, extra = _owner_filter(claim)
+    cur = conn.execute(
+        f"""
         UPDATE jobs SET status = %s, finished_at = NOW(), exit_code = %s,
             error_message = %s, pid = NULL
-        WHERE id = %s
+        WHERE id = %s{where}
         """,
-        (status, exit_code, error, job_id),
+        (status, exit_code, error, job_id, *extra),
     )
+    return bool(getattr(cur, "rowcount", 1))
 
 
-def set_job_pid(conn: Any, job_id: int, pid: int) -> None:
-    conn.execute("UPDATE jobs SET pid = %s WHERE id = %s", (pid, job_id))
+def set_job_pid(conn: Any, job_id: int, pid: int, *, claim: Any = None) -> bool:
+    where, extra = _owner_filter(claim)
+    cur = conn.execute(
+        f"UPDATE jobs SET pid = %s WHERE id = %s{where}", (pid, job_id, *extra)
+    )
+    return bool(getattr(cur, "rowcount", 1))
+
+
+def job_status(conn: Any, job_id: int) -> str | None:
+    row = conn.execute("SELECT status FROM jobs WHERE id = %s", (job_id,)).fetchone()
+    return row["status"] if row else None
 
 
 def list_jobs(
@@ -1221,12 +1276,15 @@ def retry_job(conn: Any, job_id: int, created_by: str = "retry") -> int:
     job = get_job(conn, job_id)
     if not job:
         raise ValueError(f"job not found: {job_id}")
-    if job["status"] in ("pending", "running"):
+    if job["status"] in ("pending", "held", "running"):
         raise ValueError(f"cannot retry job {job_id} while status is {job['status']}")
 
     args = job.get("args_json") or {}
     if isinstance(args, str):
         args = json.loads(args)
+    if isinstance(args, dict):
+        # A retry is a fresh run, not a resume of an interrupted one.
+        args = {k: v for k, v in args.items() if k != RESUME_ARG_KEY}
 
     workspace_id = job.get("workspace_id")
     if job["job_type"] in ("reimport", "loot_process", "report") and not workspace_id:
@@ -1248,9 +1306,9 @@ def update_job(conn: Any, job_id: int, **fields: Any) -> dict[str, Any]:
     job = get_job(conn, job_id)
     if not job:
         raise ValueError(f"job not found: {job_id}")
-    if job["status"] != "pending":
+    if job["status"] not in ("pending", "held"):
         raise ValueError(
-            f"can only update pending jobs (job {job_id} is {job['status']})"
+            f"can only update pending or held jobs (job {job_id} is {job['status']})"
         )
 
     sets: list[str] = []
@@ -1335,44 +1393,303 @@ def delete_job(conn: Any, job_id: int, *, kill: bool = False) -> dict[str, Any]:
     return dict(job)
 
 
-def recover_stuck_jobs(conn: Any, max_age_minutes: int = 180) -> int:
-    result = conn.execute(
+QUEUE_PAUSED_KEY = "queue_paused"
+PAUSE_FILE = Path(os.environ.get("KITELON_PAUSE_FILE", "/var/lib/kitelon/paused"))
+DEFAULT_MAX_ATTEMPTS = 3
+# Stored in a requeued scan's args_json: the next run passes -rr. Kept out of
+# extra_args so a manual retry later starts fresh (retry_job drops it).
+RESUME_ARG_KEY = "resume_interrupted"
+# Advisory lock that orders queue pause against enqueue/requeue.
+_PAUSE_LOCK_KEY = 0x6B6974656C6F6E  # "kitelon"
+# Identifies this host or container in jobs.worker_host.
+WORKER_HOST = os.environ.get("KITELON_WORKER_HOST") or socket.gethostname()
+_JOB_PROCESS_MARKERS = ("kitelon_scan.py", "kitelon_loot.py")
+
+
+def _pid_alive(pid: Any) -> bool:
+    if not pid:
+        return False
+    try:
+        os.kill(int(pid), 0)
+    except ProcessLookupError:
+        return False
+    except (PermissionError, TypeError, ValueError, OSError):
+        return False
+    return True
+
+
+def _job_process_alive(pid: Any, job_id: int) -> bool:
+    """True only if ``pid`` is visibly a Kitelon job process on this host.
+
+    A bare PID check would match whatever unrelated process reuses the number,
+    so on Linux the command line must look like a scan or loot job (and a scan
+    must carry this job's ``--job-id``).
+    """
+    if not _pid_alive(pid):
+        return False
+    try:
+        raw = Path(f"/proc/{int(pid)}/cmdline").read_bytes()
+    except FileNotFoundError:
+        # No /proc (macOS): fall back to the bare PID check.
+        return not Path("/proc/self").exists()
+    except (OSError, ValueError):
+        return False
+    argv = [a.decode("utf-8", "replace") for a in raw.split(b"\0") if a]
+    if not any(a.endswith(_JOB_PROCESS_MARKERS) for a in argv):
+        return False
+    if any(a.endswith("kitelon_scan.py") for a in argv):
+        try:
+            idx = argv.index("--job-id")
+        except ValueError:
+            return False
+        return idx + 1 < len(argv) and argv[idx + 1] == str(job_id)
+    return True
+
+
+def _lock_pause_shared(conn: Any) -> None:
+    """Hold off a concurrent pause until this transaction commits."""
+    conn.execute("SELECT pg_advisory_xact_lock_shared(%s)", (_PAUSE_LOCK_KEY,))
+
+
+def _terminate_process_group(pid: Any) -> None:
+    try:
+        os.killpg(int(pid), signal.SIGTERM)
+    except (ProcessLookupError, PermissionError, OSError, TypeError, ValueError):
+        try:
+            os.kill(int(pid), signal.SIGTERM)
+        except (ProcessLookupError, PermissionError, OSError, TypeError, ValueError):
+            pass
+
+
+def _settings_table_exists(conn: Any) -> bool:
+    row = conn.execute("SELECT to_regclass('kitelon_settings') AS t").fetchone()
+    return bool(row and row.get("t"))
+
+
+def queue_paused(conn: Any) -> bool:
+    """True when the queue is paused (DB flag or pause file)."""
+    if PAUSE_FILE.exists():
+        return True
+    if not _settings_table_exists(conn):
+        return False
+    row = conn.execute(
+        "SELECT value FROM kitelon_settings WHERE key = %s", (QUEUE_PAUSED_KEY,)
+    ).fetchone()
+    return bool(row and row.get("value") == "1")
+
+
+def set_queue_paused(conn: Any, paused: bool, *, hold_pending: bool = True) -> int:
+    """Set the DB pause flag. Returns the number of jobs held or released.
+
+    Pausing also moves ``pending`` jobs to ``held`` so workers older than the
+    pause flag (which only claim ``pending``) cannot pick them up mid-upgrade.
+    The exclusive advisory lock waits for in-flight enqueues to commit, so none
+    can slip in a ``pending`` job after the pause.
+    """
+    conn.execute("SELECT pg_advisory_xact_lock(%s)", (_PAUSE_LOCK_KEY,))
+    conn.execute(
         """
-        SELECT id, pid FROM jobs
-        WHERE status = 'running'
-          AND started_at < NOW() - (%s || ' minutes')::interval
+        CREATE TABLE IF NOT EXISTS kitelon_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO kitelon_settings (key, value, updated_at) VALUES (%s, %s, NOW())
+        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
         """,
-        (str(max_age_minutes),),
+        (QUEUE_PAUSED_KEY, "1" if paused else "0"),
+    )
+    if paused and hold_pending:
+        cur = conn.execute("UPDATE jobs SET status = 'held' WHERE status = 'pending'")
+        return cur.rowcount or 0
+    if not paused:
+        cur = conn.execute("UPDATE jobs SET status = 'pending' WHERE status = 'held'")
+        return cur.rowcount or 0
+    return 0
+
+
+def list_running_jobs(conn: Any) -> list[dict[str, Any]]:
+    has_heartbeat = conn.execute(
+        """
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'jobs' AND column_name = 'heartbeat_at'
+        """
+    ).fetchone()
+    beat = "j.heartbeat_at" if has_heartbeat else "NULL::timestamptz"
+    rows = conn.execute(
+        f"""
+        SELECT j.id, j.job_type, j.target, j.mode, j.pid, j.started_at,
+               {beat} AS heartbeat_at, w.alias AS workspace_alias
+        FROM jobs j
+        LEFT JOIN workspaces w ON w.id = j.workspace_id
+        WHERE j.status = 'running'
+        ORDER BY j.started_at NULLS LAST, j.id
+        """
     ).fetchall()
-    recovered = 0
-    for row in result:
-        pid = row.get("pid")
-        if pid:
-            try:
-                os.kill(int(pid), 0)
-            except ProcessLookupError:
-                pid = None
-            except (PermissionError, TypeError, ValueError):
-                pid = None
-            else:
-                try:
-                    os.killpg(int(pid), signal.SIGTERM)
-                except (ProcessLookupError, PermissionError, OSError):
-                    try:
-                        os.kill(int(pid), signal.SIGTERM)
-                    except (ProcessLookupError, PermissionError, OSError):
-                        pass
-                continue
+    return [dict(r) for r in rows]
+
+
+def requeue_job(
+    conn: Any,
+    job_id: int,
+    *,
+    reason: str,
+    max_attempts: int = DEFAULT_MAX_ATTEMPTS,
+    resume: bool = True,
+    claim: Any = None,
+    count_attempt: bool = True,
+    delay_seconds: int = 0,
+) -> str:
+    """Put an interrupted running job back in the queue.
+
+    Scan jobs are marked to resume (``-rr``) so the manifest skips finished
+    steps. ``count_attempt=False`` is for interruptions that aren't the job's
+    fault (a worker shutting down): the attempt is given back and the retry
+    cap isn't checked. ``claim`` restricts the requeue to the run that owns the
+    job. ``delay_seconds`` holds the job back, e.g. while a run that recover
+    can't see may still be stopping. Returns ``requeued``, ``failed`` (retry
+    cap hit) or ``skipped``.
+    """
+    where, extra = _owner_filter(claim)
+    job = conn.execute(
+        f"""
+        SELECT id, job_type, args_json, COALESCE(attempts, 0) AS attempts
+        FROM jobs WHERE id = %s AND status = 'running'{where}
+        FOR UPDATE
+        """,
+        (job_id, *extra),
+    ).fetchone()
+    if not job:
+        return "skipped"
+
+    attempts = int(job["attempts"])
+    if count_attempt and max_attempts and attempts >= max_attempts:
         conn.execute(
             """
-            UPDATE jobs SET status = 'failed', finished_at = NOW(),
-                error_message = 'recovered: exceeded max runtime', pid = NULL
-            WHERE id = %s AND status = 'running'
+            UPDATE jobs SET status = 'failed', finished_at = NOW(), pid = NULL,
+                error_message = %s
+            WHERE id = %s
             """,
-            (row["id"],),
+            (f"{reason}; gave up after {attempts} attempt(s)", job_id),
         )
-        recovered += 1
+        return "failed"
+    if not count_attempt:
+        attempts = max(0, attempts - 1)
+
+    args = job.get("args_json") or {}
+    if isinstance(args, str):
+        args = json.loads(args)
+    args = dict(args)
+    if resume and job["job_type"] == "scan":
+        args[RESUME_ARG_KEY] = True
+
+    _lock_pause_shared(conn)
+    status = "held" if queue_paused(conn) else "pending"
+    note = (
+        f"requeued (attempt {attempts} of {max_attempts})"
+        if count_attempt
+        else "requeued (not counted as an attempt)"
+    )
+    conn.execute(
+        """
+        UPDATE jobs SET status = %s, pid = NULL, started_at = NULL,
+            heartbeat_at = NULL, worker_host = NULL, attempts = %s,
+            scheduled_at = NOW() + make_interval(secs => %s), args_json = %s::jsonb,
+            error_message = %s
+        WHERE id = %s
+        """,
+        (
+            status,
+            attempts,
+            int(delay_seconds),
+            json.dumps(args),
+            f"{reason}; {note}",
+            job_id,
+        ),
+    )
+    return "requeued"
+
+
+# How long recover holds back a job whose old run it couldn't confirm stopped:
+# the old worker notices it lost the job on its next heartbeat and stops it.
+ORPHAN_REQUEUE_DELAY_SEC = 120
+
+
+def recover_stuck_jobs(
+    conn: Any,
+    stale_minutes: int = 10,
+    *,
+    grace_seconds: int = 120,
+    max_attempts: int = DEFAULT_MAX_ATTEMPTS,
+) -> int:
+    """Requeue running jobs whose worker is gone.
+
+    - Heartbeat (or start time, for legacy jobs) older than ``stale_minutes``:
+      the worker is gone. Requeue; stop the old process only if it is visibly
+      this job's process on this host.
+    - Claimed on this host, heartbeat older than ``grace_seconds`` and the job's
+      process is gone: the worker crashed. Requeue right away.
+
+    A job that is still heartbeating is never touched, however long it has run.
+    PIDs from another host or container (``worker_host``) are never trusted or
+    signalled, since the same number may belong to an unrelated local process.
+    """
+    rows = conn.execute(
+        """
+        SELECT id, pid, worker_host,
+            COALESCE(heartbeat_at, started_at) < NOW() - make_interval(mins => %s) AS stale,
+            COALESCE(heartbeat_at, started_at) < NOW() - make_interval(secs => %s) AS past_grace
+        FROM jobs
+        WHERE status = 'running'
+        """,
+        (int(stale_minutes), int(grace_seconds)),
+    ).fetchall()
+    recovered = 0
+    for row in rows:
+        job_id = int(row["id"])
+        pid = row.get("pid")
+        local = row.get("worker_host") == WORKER_HOST
+        alive = bool(pid) and _job_process_alive(pid, job_id)
+        delay = 0
+        if row.get("stale"):
+            if alive:
+                # Nobody is heartbeating for this process, so nobody will record
+                # its result: stop it and resume it under a live worker.
+                _terminate_process_group(pid)
+            elif not local:
+                # Its run may still be going somewhere we can't see; give its
+                # worker time to notice the lost heartbeat and stop it.
+                delay = ORPHAN_REQUEUE_DELAY_SEC
+            reason = "worker stopped heartbeating"
+        elif local and pid and not alive and row.get("past_grace"):
+            reason = "worker process exited"
+        else:
+            continue
+        outcome = requeue_job(
+            conn, job_id, reason=reason, max_attempts=max_attempts, delay_seconds=delay
+        )
+        if outcome != "skipped":
+            recovered += 1
     return recovered
+
+
+def pending_migrations(conn: Any) -> list[str]:
+    """Migration files in sql/migrations that haven't been applied."""
+    if not MIGRATIONS_DIR.is_dir():
+        return []
+    files = sorted(f.name for f in MIGRATIONS_DIR.glob("*.sql"))
+    row = conn.execute("SELECT to_regclass('schema_migrations') AS t").fetchone()
+    if not row or not row.get("t"):
+        return files
+    applied = {
+        r["version"] for r in conn.execute("SELECT version FROM schema_migrations").fetchall()
+    }
+    return [f for f in files if f not in applied]
 
 
 def promote_schedules(conn: Any) -> int:
@@ -1663,7 +1980,7 @@ def prune_invalid_workspaces(
             active = conn.execute(
                 """
                 SELECT 1 FROM jobs
-                WHERE workspace_id = %s AND status IN ('pending', 'running')
+                WHERE workspace_id = %s AND status IN ('pending', 'held', 'running')
                 LIMIT 1
                 """,
                 (row["id"],),

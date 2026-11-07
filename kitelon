@@ -153,6 +153,14 @@ $star REPORTS
  kitelon -w <WORKSPACE> --reports-zip --pdf-only
    (packs all reports — scan, pentest, SSL/TLS — into one ZIP as PDF + HTML)
 
+$star UPGRADE (pause the queue / drain running scans)
+ kitelon upgrade status
+ kitelon upgrade pause | resume
+ kitelon upgrade drain [--timeout SEC]
+ sudo bash install.sh force [--drain-timeout SEC] [--force-stop] [--no-drain]
+   (install.sh drains automatically: waits for running scans, stops workers,
+    upgrades, restarts workers, resumes the queue)
+
 $star ADMIN
  kitelon -w <WORKSPACE> --export
  kitelon --import-zip /path/to/workspace.zip
@@ -202,6 +210,9 @@ kitelon_cmd_is_meta() {
       return 0
       ;;
     *"--reports-zip"*|*"--reports-pdf"*)
+      return 0
+      ;;
+    *"kitelon upgrade"*)
       return 0
       ;;
     *" -h"|*" -u"|*" -d"|*" --delete"*|*" -dh"*|*" -dt"*)
@@ -308,47 +319,26 @@ kitelon_stop_cmd() {
 
 function check_update {
   if [[ "$ENABLE_AUTO_UPDATES" == "1" ]] && [[ "$ONLINE" == "1" ]]; then
-    echo -e "$KL_C_INFO[$KL_RESET${KL_C_ERR}i${KL_RESET}$KL_C_INFO] Updates are available via$KL_C_ERR \"kitelon -u\"$KL_RESET when a git remote is configured."
+    echo -e "$KL_C_INFO[$KL_RESET${KL_C_ERR}i${KL_RESET}$KL_C_INFO] Check for updates with$KL_C_ERR \"sudo kitelon -u\"$KL_RESET (from github.com/jonsjava/kitelon)."
   fi
   touch /tmp/kitelon-update-check.txt 2> /dev/null
 }
 
 function update {
+  # Fetches the latest Kitelon from GitHub (KITELON_UPDATE_REPO, branch
+  # KITELON_UPDATE_BRANCH) into a separate clone and installs it with
+  # install.sh, which drains the job queue first. See bin/kitelon_update.sh.
   kl_print_header
-  echo -e "$KL_C_INFO[*]$KL_RESET Checking for updates...$KL_C_INFO[$KL_RESET${KL_C_OK}OK${KL_RESET}$KL_C_INFO]$KL_RESET"
-
-  if [[ "$ONLINE" == "0" ]]; then
-    echo "No internet connection. Cannot check for updates."
+  if [[ $EUID -ne 0 ]]; then
+    echo "Updating Kitelon needs root: sudo kitelon -u"
     exit 1
   fi
-
-  if ! command -v git &>/dev/null; then
-    echo "git is not installed. Cannot update from source."
-    exit 1
-  fi
-
-  REPO_ROOT=$(cd "$INSTALL_DIR" && git rev-parse --show-toplevel 2>/dev/null)
-  if [[ -z "$REPO_ROOT" ]]; then
-    echo "No git repository found at $INSTALL_DIR."
-    echo "Configure a remote and reinstall from source, or copy updates manually."
-    exit 1
-  fi
-
-  REMOTE=$(cd "$REPO_ROOT" && git remote 2>/dev/null | head -1)
-  if [[ -z "$REMOTE" ]]; then
-    echo "No git remote configured for this installation."
-    echo "Add a remote to your checkout, then run: kitelon -u"
-    exit 1
-  fi
-
-  echo -e "$KL_C_INFO[$KL_RESET${KL_C_ERR}i${KL_RESET}$KL_C_INFO] Pull updates from $REMOTE and reinstall? (y or n)$KL_RESET"
-  read ans
-  if [[ "$ans" = "y" ]] || [[ "$ans" = "Y" ]]; then
-    cd "$REPO_ROOT"
-    git pull "$REMOTE" "$(git branch --show-current 2>/dev/null || echo master)"
-    bash "$REPO_ROOT/install.sh" force
-    exit
-  fi
+  INSTALL_DIR="$INSTALL_DIR" \
+    KITELON_UPDATE_REPO="${KITELON_UPDATE_REPO:-}" \
+    KITELON_UPDATE_BRANCH="${KITELON_UPDATE_BRANCH:-}" \
+    KITELON_SRC_DIR="${KITELON_SRC_DIR:-}" \
+    bash "$INSTALL_DIR/bin/kitelon_update.sh" "$@"
+  exit $?
 }
 
 if [[ "$UPDATE" = "1" ]]; then
@@ -370,6 +360,7 @@ function check_online {
 # COMMAND LINE SWITCHES
 DB_SUBCMD=""
 JOBS_SUBCMD=""
+UPGRADE_SUBCMD=""
 WORKSPACES_SUBCMD=""
 WEB_MODE=""
 POSITIONAL=()
@@ -508,6 +499,11 @@ case $key in
       shift
     fi
     ;;
+    upgrade)
+    UPGRADE_SUBCMD="${2:-status}"
+    shift
+    [[ $# -gt 0 ]] && shift
+    ;;
     jobs)
     JOBS_SUBCMD="$2"
     shift
@@ -635,9 +631,9 @@ case $key in
     ;;
     -u|--update)
     UPDATE="1"
-    update
-    exit
     shift
+    update "$@"
+    exit
     ;;
     -rr|--resume)
     RESUME="1"
@@ -645,7 +641,7 @@ case $key in
     ;;
     *)
     # jobs/workspaces/db forward remaining tokens (aliases, --limit, --json, …)
-    if [[ -n "$JOBS_SUBCMD" || -n "$WORKSPACES_SUBCMD" || -n "$DB_SUBCMD" ]]; then
+    if [[ -n "$JOBS_SUBCMD" || -n "$WORKSPACES_SUBCMD" || -n "$DB_SUBCMD" || -n "$UPGRADE_SUBCMD" ]]; then
       POSITIONAL+=("$1")
       shift
       continue
@@ -664,6 +660,13 @@ kitelon_export_db_env() {
   export DB_NAME="${DB_NAME:-kitelon}"
   export DB_USER="${DB_USER:-postgres}"
 }
+
+if [[ -n "$UPGRADE_SUBCMD" ]]; then
+  export PYTHONPATH="$INSTALL_DIR/bin${PYTHONPATH:+:$PYTHONPATH}"
+  kitelon_export_db_env
+  KITELON_INSTALL_DIR="$INSTALL_DIR" python3 "$INSTALL_DIR/bin/kitelon_upgrade.py" "$UPGRADE_SUBCMD" "$@"
+  exit $?
+fi
 
 if [[ -n "$DB_SUBCMD" ]]; then
   export PYTHONPATH="$INSTALL_DIR/bin${PYTHONPATH:+:$PYTHONPATH}"
@@ -837,6 +840,12 @@ function kitelon_run_scan {
   kl_require_authorized_use
   init
   export PYTHONPATH="$INSTALL_DIR/bin${PYTHONPATH:+:$PYTHONPATH}"
+  kitelon_export_db_env
+  if KITELON_INSTALL_DIR="$INSTALL_DIR" python3 "$INSTALL_DIR/bin/kitelon_upgrade.py" is-paused 2>/dev/null; then
+    echo -e "$KL_C_ERR[!]$KL_RESET Kitelon is paused for an upgrade; new scans are blocked."
+    echo -e "    Check: sudo kitelon upgrade status   Resume: sudo kitelon upgrade resume"
+    exit 1
+  fi
   SCAN_CMD=(python3 "$INSTALL_DIR/bin/kitelon_scan.py" --target "$TARGET" --mode "${MODE:-normal}")
   [[ -n "$WORKSPACE" ]] && SCAN_CMD+=(--workspace "$WORKSPACE")
   [[ "$RESUME" == "1" ]] && SCAN_CMD+=(--resume)

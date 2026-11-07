@@ -28,6 +28,7 @@ from kitelon_db import (
     delete_schedule,
     delete_workspace,
     enqueue_job,
+    job_status,
     ensure_workspace,
     get_connection,
     get_heartbeat,
@@ -440,9 +441,10 @@ def create_app() -> FastAPI:
                     priority=50,
                     created_by="web-ui",
                 )
+                status = job_status(conn, job_id) or "pending"
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
-        return {"id": job_id, "status": "pending", "job_type": "loot_process"}
+        return {"id": job_id, "status": status, "job_type": "loot_process"}
 
     async def _import_scanner_file(
         alias: str, scanner: str, file: UploadFile
@@ -1027,12 +1029,13 @@ def create_app() -> FastAPI:
         try:
             with get_connection() as conn:
                 new_id = retry_job(conn, job_id, created_by="web-ui")
+                status = job_status(conn, new_id) or "pending"
         except ValueError as exc:
             msg = str(exc)
             if "not found" in msg:
                 raise HTTPException(404, msg) from exc
             raise HTTPException(400, msg) from exc
-        return {"id": new_id, "status": "pending", "retried_from": job_id}
+        return {"id": new_id, "status": status, "retried_from": job_id}
 
     @app.patch("/api/v1/jobs/{job_id}")
     async def update_job_endpoint(
@@ -1112,9 +1115,10 @@ def create_app() -> FastAPI:
                     priority=priority,
                     created_by=created_by,
                 )
+                status = job_status(conn, job_id) or "pending"
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
-        return {"id": job_id, "status": "pending"}
+        return {"id": job_id, "status": status}
 
     @app.get("/api/v1/scan-config")
     def scan_config(_: None = Depends(require_api_key)) -> dict[str, Any]:

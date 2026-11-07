@@ -9,7 +9,7 @@ if TYPE_CHECKING:
 
 Handler = Callable[["KitelonShell", list[str]], None]
 
-CONTEXT_HELP_COMMANDS = frozenset({"workspace", "jobs", "schedule", "scan", "db", "use"})
+CONTEXT_HELP_COMMANDS = frozenset({"workspace", "jobs", "schedule", "scan", "db", "use", "upgrade"})
 
 
 def _out(shell: KitelonShell, text: str) -> None:
@@ -538,6 +538,29 @@ See current context: context
     )
 
 
+def _upgrade(shell: KitelonShell, parts: list[str]) -> None:
+    _out(
+        shell,
+        """
+upgrade: pause the job queue around an upgrade
+
+Subcommands:
+  status    Pause state, held jobs, running jobs and scan processes
+  pause     Pause the queue; running scans continue, queued jobs wait as 'held'
+  resume    Resume the queue; held jobs become pending again
+
+The installer does this for you: `sudo bash install.sh force` pauses the queue,
+waits for running scans to finish, stops the workers, upgrades, restarts them
+and resumes. To wait for running scans from a shell: `kitelon upgrade drain`.
+
+Examples:
+  upgrade status
+  upgrade pause
+  upgrade resume
+""",
+    )
+
+
 _HANDLERS: dict[str, Handler] = {
     "workspace": _workspace,
     "jobs": _jobs,
@@ -545,6 +568,7 @@ _HANDLERS: dict[str, Handler] = {
     "scan": _scan,
     "db": _db,
     "use": _use,
+    "upgrade": _upgrade,
 }
 
 

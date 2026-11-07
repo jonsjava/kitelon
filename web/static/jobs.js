@@ -32,7 +32,7 @@
     const actTd = document.createElement("td");
     actTd.className = "job-actions";
 
-    if (j.status === "pending") {
+    if (j.status === "pending" || j.status === "held") {
       const edit = document.createElement("button");
       edit.type = "button";
       edit.className = "secondary btn-sm";
