@@ -71,6 +71,8 @@ services:
     image: kitelon:local
     restart: unless-stopped
     command: worker
+    # Time to stop running scans and requeue them (worker waits up to 60s).
+    stop_grace_period: 90s
     environment: *kitelon-env
     volumes: *kitelon-volumes
     depends_on:

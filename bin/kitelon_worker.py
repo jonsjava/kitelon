@@ -4,10 +4,12 @@
 import argparse
 import json
 import os
+import signal
 import subprocess
 import sys
 import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 _BIN_DIR = Path(__file__).resolve().parent
@@ -24,22 +26,99 @@ from kitelon_db import (  # noqa: E402
     log,
     normalize_workspace_alias,
     promote_schedules,
+    queue_paused,
     recover_stuck_jobs,
+    requeue_job,
     set_job_pid,
     touch_heartbeat,
+    touch_job_heartbeat,
 )
 from kitelon_log import get_logger  # noqa: E402
 
 INSTALL_DIR = Path(os.environ.get("KITELON_INSTALL_DIR", "/usr/share/kitelon"))
 SCAN_SCRIPT = Path(os.environ.get("KITELON_SCAN_SCRIPT", INSTALL_DIR / "bin" / "kitelon_scan.py"))
 POLL_SEC = int(os.environ.get("WORKER_POLL_SEC", "10"))
-STUCK_MINUTES = int(os.environ.get("WORKER_STUCK_MINUTES", "180"))
+# A running job whose heartbeat is older than this is treated as orphaned and
+# requeued. Workers touch the heartbeat every HEARTBEAT_SEC, so keep this well
+# above it. (Replaces the old 180-minute WORKER_STUCK_MINUTES cutoff.)
+STALE_MINUTES = int(os.environ.get("WORKER_STALE_MINUTES", "10"))
+# Must stay below recover's 2-minute dead-process grace: in Docker the recover
+# sidecar can't see the worker's PIDs, so a fresh heartbeat is what keeps it
+# from requeueing a scan that is still running.
+HEARTBEAT_SEC = max(1, int(os.environ.get("WORKER_HEARTBEAT_SEC", "30")))
+# How long a stopping worker waits for running jobs to exit before requeueing
+# them anyway. Keep below systemd's TimeoutStopSec / Docker's stop_grace_period.
+SHUTDOWN_GRACE_SEC = int(os.environ.get("WORKER_SHUTDOWN_GRACE_SEC", "60"))
 POST_CONCURRENCY = max(1, int(os.environ.get("WORKER_POST_CONCURRENCY", "2")))
 WORKER_ROLE = os.environ.get("WORKER_ROLE", "both").lower()
 
 _worker_logger = get_logger("worker")
 
 _stop = threading.Event()
+
+# job_id -> subprocess currently running for it, so shutdown can stop them.
+_active: dict[int, subprocess.Popen] = {}
+_active_lock = threading.RLock()  # re-entrant: the signal handler takes it too
+
+
+def _run_job_process(
+    job_id: int, cmd: list[str], *, capture_stdout: bool = True
+) -> tuple[int, str, str]:
+    """Run a job's subprocess in its own session, tracked for shutdown."""
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE if capture_stdout else subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
+    with _active_lock:
+        _active[job_id] = proc
+    try:
+        if _stop.is_set():
+            # Shutdown began between claim and start: don't run the job.
+            _terminate(proc)
+        with get_connection() as conn:
+            set_job_pid(conn, job_id, proc.pid)
+        stdout, stderr = proc.communicate()
+    finally:
+        with _active_lock:
+            _active.pop(job_id, None)
+    return proc.returncode, stdout or "", stderr or ""
+
+
+def _terminate(proc: subprocess.Popen, sig: int = signal.SIGTERM) -> None:
+    if proc.poll() is not None:
+        return
+    try:
+        os.killpg(proc.pid, sig)
+    except (ProcessLookupError, PermissionError, OSError):
+        try:
+            proc.send_signal(sig)
+        except (ProcessLookupError, OSError):
+            pass
+
+
+@contextmanager
+def job_heartbeat(job_id: int, interval: float = HEARTBEAT_SEC):
+    """Touch ``jobs.heartbeat_at`` every ``interval`` seconds while the job runs."""
+    done = threading.Event()
+
+    def beat() -> None:
+        while not done.wait(interval):
+            try:
+                with get_connection() as conn:
+                    touch_job_heartbeat(conn, job_id)
+            except Exception as exc:
+                log(f"job {job_id} heartbeat failed: {exc}")
+
+    thread = threading.Thread(target=beat, name=f"kitelon-beat-{job_id}", daemon=True)
+    thread.start()
+    try:
+        yield
+    finally:
+        done.set()
+        thread.join(timeout=5)
 
 
 def build_scan_command(job: dict) -> list[str]:
@@ -88,7 +167,8 @@ def run_loot_job(job: dict) -> tuple[int, str]:
         return 1, f"workspace not found: {alias}"
 
     action = loot_action_for_job(job)
-    proc = subprocess.run(
+    code, stdout, stderr = _run_job_process(
+        int(job["id"]),
         [
             "python3",
             str(INSTALL_DIR / "bin" / "kitelon_loot.py"),
@@ -99,11 +179,9 @@ def run_loot_job(job: dict) -> tuple[int, str]:
             "--action",
             action,
         ],
-        capture_output=True,
-        text=True,
     )
-    err = proc.stderr.strip() or proc.stdout.strip()
-    return proc.returncode, err
+    err = stderr.strip() or stdout.strip()
+    return code, err
 
 
 def run_job(job: dict) -> tuple[int, str]:
@@ -117,20 +195,11 @@ def run_job(job: dict) -> tuple[int, str]:
         if not job.get("workspace_alias"):
             return 1, "scan job missing workspace"
         cmd = build_scan_command(job)
-        proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            text=True,
-            start_new_session=True,
-        )
-        with get_connection() as conn:
-            set_job_pid(conn, job_id, proc.pid)
-        _stdout, stderr = proc.communicate()
-        err = (stderr or "").strip()
+        code, _stdout, stderr = _run_job_process(job_id, cmd, capture_stdout=False)
+        err = stderr.strip()
         if len(err) > 8000:
             err = err[:8000] + "…"
-        if proc.returncode == 0 and job.get("workspace_alias"):
+        if code == 0 and job.get("workspace_alias"):
             with get_connection() as conn:
                 ws = get_workspace_by_alias(conn, job["workspace_alias"])
                 if ws:
@@ -141,13 +210,17 @@ def run_job(job: dict) -> tuple[int, str]:
                         created_by=f"worker:after-scan:{job_id}",
                         priority=50,
                     )
-        return proc.returncode, err
+        return code, err
 
     return 1, f"unknown job_type: {job_type}"
 
 
 def execute_one(role: str) -> bool:
+    if _stop.is_set():
+        return False
     with get_connection() as conn:
+        if queue_paused(conn):
+            return False
         exclude = get_running_scan_workspace_ids(conn) or None
         job = claim_next_job(conn, role=role, exclude_workspace_ids=exclude)
     if not job:
@@ -155,10 +228,19 @@ def execute_one(role: str) -> bool:
 
     job_id = int(job["id"])
     log(f"[{role}] running job {job_id} type={job['job_type']} target={job.get('target')}")
-    try:
-        code, err = run_job(job)
-    except Exception as exc:
-        code, err = 1, str(exc)
+    with job_heartbeat(job_id):
+        try:
+            code, err = run_job(job)
+        except Exception as exc:
+            code, err = 1, str(exc)
+
+    if code != 0 and _stop.is_set():
+        # Interrupted by worker shutdown: put it back instead of failing it.
+        with get_connection() as conn:
+            outcome = requeue_job(conn, job_id, reason="worker shut down")
+            touch_heartbeat(conn, job_id, f"{role}: {outcome} on shutdown")
+        log(f"[{role}] job {job_id} interrupted by shutdown: {outcome}")
+        return True
 
     with get_connection() as conn:
         complete_job(conn, job_id, exit_code=code, error=err if code != 0 else None)
@@ -200,10 +282,40 @@ def scan_worker_loop() -> None:
 
 def recover() -> None:
     with get_connection() as conn:
-        stuck = recover_stuck_jobs(conn, STUCK_MINUTES)
+        stuck = recover_stuck_jobs(conn, STALE_MINUTES)
         promoted = promote_schedules(conn)
         touch_heartbeat(conn, None, f"recover stuck={stuck} promoted={promoted}")
     log(f"recover: stuck={stuck} schedules_promoted={promoted}")
+
+
+def _request_stop(signum: int, _frame: object) -> None:
+    """SIGTERM/SIGINT: stop claiming and stop the running jobs' processes."""
+    if not _stop.is_set():
+        log(f"worker received signal {signum}; stopping running jobs to requeue them")
+    _stop.set()
+    with _active_lock:
+        procs = list(_active.values())
+    for proc in procs:
+        _terminate(proc)
+
+
+def shutdown(threads: list[threading.Thread], grace: float = SHUTDOWN_GRACE_SEC) -> None:
+    """Wait for worker threads to requeue their jobs; force it after ``grace``."""
+    _stop.set()
+    deadline = time.monotonic() + grace
+    for thread in threads:
+        thread.join(timeout=max(0.0, deadline - time.monotonic()))
+    with _active_lock:
+        leftover = dict(_active)
+    if not leftover:
+        log("worker stopped")
+        return
+    for proc in leftover.values():
+        _terminate(proc, signal.SIGKILL)
+    with get_connection() as conn:
+        for job_id in leftover:
+            outcome = requeue_job(conn, job_id, reason="worker shut down (forced)")
+            log(f"job {job_id} did not stop within {grace:.0f}s: {outcome}")
 
 
 def run_daemon() -> None:
@@ -211,6 +323,18 @@ def run_daemon() -> None:
         f"worker started role={WORKER_ROLE} poll={POLL_SEC}s "
         f"post_concurrency={POST_CONCURRENCY} scan={SCAN_SCRIPT}"
     )
+    if WORKER_ROLE not in ("both", "scan", "post"):
+        raise SystemExit(f"invalid WORKER_ROLE={WORKER_ROLE!r} (use both, scan, or post)")
+    signal.signal(signal.SIGTERM, _request_stop)
+    signal.signal(signal.SIGINT, _request_stop)
+
+    # Requeue jobs orphaned by a previous worker (crash, kill, reboot) now
+    # instead of waiting for the next recover run.
+    try:
+        recover()
+    except Exception as exc:
+        log(f"startup recover failed: {exc}")
+
     threads: list[threading.Thread] = []
 
     if WORKER_ROLE in ("both", "post"):
@@ -233,14 +357,9 @@ def run_daemon() -> None:
         scan_thread.start()
         threads.append(scan_thread)
 
-    if not threads:
-        raise SystemExit(f"invalid WORKER_ROLE={WORKER_ROLE!r} (use both, scan, or post)")
-
-    try:
-        while True:
-            _stop.wait(3600)
-    except KeyboardInterrupt:
-        _stop.set()
+    while not _stop.wait(3600):
+        pass
+    shutdown(threads)
 
 
 def run_once() -> None:
